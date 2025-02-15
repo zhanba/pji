@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use pj::{app, config};
+use pj::app::PJApp;
 
 /// Pj provide a tree structure to manage your git projects.
 #[derive(Debug, Parser)]
@@ -72,18 +72,17 @@ fn main() {
         Some(command) => {
             match command {
                 Commands::Init => {
-                    app::PJApp::init();
+                    PJApp::init();
                 }
                 Commands::Add { git } => {
-                    app::PJApp::new().add(git.as_str());
+                    PJApp::new().add(git.as_str());
                 }
                 Commands::Remove { git } => {
                     // Handle the "remove" command
                     println!("Removing git project: {}", git);
                 }
                 Commands::List => {
-                    // Handle the "list" command
-                    println!("Listing git projects...");
+                    PJApp::new().list();
                 }
                 Commands::Find { query } => {
                     // Handle the "find" command
