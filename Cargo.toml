@@ -1,0 +1,12 @@
+[package]
+name = "pj"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.28", features = ["derive"] }
+confy = "0.6.1"
+dialoguer = "0.11.0"
+directories = "6.0.0"
+regex = "1.11.1"
+serde = { version = "1.0.217", features = ["derive"] }
