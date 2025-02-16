@@ -78,8 +78,7 @@ fn main() {
                     PJApp::new().add(git.as_str());
                 }
                 Commands::Remove { git } => {
-                    // Handle the "remove" command
-                    println!("Removing git project: {}", git);
+                    PJApp::new().remove(git.as_str());
                 }
                 Commands::List => {
                     PJApp::new().list();
