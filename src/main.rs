@@ -27,7 +27,7 @@ enum Commands {
     /// list all git projects
     List,
     /// fuzz search git project
-    Find { query: String },
+    Find { query: Option<String> },
     ///  scan all git repo in root dir and write repo info into `~/.pj/repo.toml`
     Update,
     /// check root dir and download all missing repos
@@ -85,8 +85,7 @@ fn main() {
                     PJApp::new().list();
                 }
                 Commands::Find { query } => {
-                    // Handle the "find" command
-                    println!("Searching for git projects matching query: {}", query);
+                    PJApp::new().find(query.as_deref().unwrap_or(""));
                 }
                 Commands::Update => {
                     // Handle the "update" command

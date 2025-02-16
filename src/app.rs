@@ -1,7 +1,7 @@
 use crate::config::{PJConfig, PJMetadata, PJRepo};
 use arboard::Clipboard;
 use comfy_table::Table;
-use dialoguer::{console::style, Confirm, Input};
+use dialoguer::{console::style, Confirm, FuzzySelect, Input};
 use std::io::{self};
 use std::process::{Command, Stdio};
 use std::{fs::create_dir_all, path::PathBuf};
@@ -61,25 +61,46 @@ impl PJApp {
         create_dir_all(&repo.dir).expect("should create repo dir success");
         PJApp::clone_repo(&repo.git_uri.uri, &repo.dir).expect("should clone repo success");
         self.metadata.add_repo(&repo).save();
-        Clipboard::new()
-            .expect("can't find clipboard")
-            .set_text(format!("cd {}", repo.dir))
-            .expect("can't set clipboard");
+        PJApp::copy_to_clipboard(&format!("cd {}", repo.dir));
     }
 
     pub fn list(&self) {
         let mut table = Table::new();
-        table.set_header(vec!["dir", "protocol", "user", "repo", "full git uri"]);
+        table.set_header(vec![
+            "dir", "protocol", "hostname", "user", "repo", "full uri",
+        ]);
         self.metadata.list_repos().iter().for_each(|repo| {
             table.add_row(vec![
                 repo.dir.clone(),
                 repo.git_uri.protocol.as_str().to_string(),
+                repo.git_uri.hostname.clone(),
                 repo.git_uri.user.clone(),
                 repo.git_uri.repo.clone(),
                 repo.git_uri.uri.clone(),
             ]);
         });
         println!("{table}");
+    }
+
+    pub fn find(&self, query: &str) {
+        let items = self
+            .metadata
+            .list_repos()
+            .iter()
+            .map(|repo| repo.dir.clone())
+            .collect::<Vec<String>>();
+
+        let selection = FuzzySelect::new()
+            .with_prompt("Input repo name to search: ")
+            .with_initial_text(query)
+            .highlight_matches(true)
+            .max_length(10)
+            .items(&items)
+            .interact()
+            .unwrap();
+
+        println!("You choose: {}", items[selection]);
+        PJApp::copy_to_clipboard(&format!("cd {}", items[selection]));
     }
 
     fn clone_repo(repo: &str, dir: &str) -> io::Result<()> {
@@ -103,5 +124,17 @@ impl PJApp {
 
     fn success_message(message: &str) {
         println!("🚀 {}", style(message).green());
+    }
+
+    fn copy_to_clipboard(text: &str) {
+        Clipboard::new()
+            .expect("can't find clipboard")
+            .set_text(text)
+            .expect("can't set clipboard");
+
+        println!(
+            "📋 Copied \"{}\" to clipboard, just paste it in",
+            style(text).green()
+        )
     }
 }
