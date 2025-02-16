@@ -1,10 +1,10 @@
 use clap::{Args, Parser, Subcommand};
-use pjs::app::PJApp;
+use pji::app::PjiApp;
 
 /// Pj provide a tree structure to manage your git projects.
 #[derive(Debug, Parser)]
-#[command(name = "pj")]
-#[command(version, about = "pj provide a tree structure to manage your git projects.", long_about = None)]
+#[command(name = "pji")]
+#[command(version, about = "pji provide a tree structure to manage your git projects.", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -12,7 +12,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// init pj: select root dir, create a new config file at `~/.pj/config.toml`
+    /// init pji: select root dir, create a new config file at `~/.pji/config.toml`
     Init,
     /// add a git project
     Add {
@@ -28,7 +28,7 @@ enum Commands {
     List,
     /// fuzz search git project
     Find { query: Option<String> },
-    ///  scan all git repo in root dir and write repo info into `~/.pj/repo.toml`
+    ///  scan all git repo in root dir and write repo info into `~/.pji/repo.toml`
     Update,
     /// check root dir and download all missing repos
     Pull,
@@ -65,19 +65,19 @@ fn main() {
         Some(command) => {
             match command {
                 Commands::Init => {
-                    PJApp::init();
+                    PjiApp::init();
                 }
                 Commands::Add { git } => {
-                    PJApp::new().add(git.as_str());
+                    PjiApp::new().add(git.as_str());
                 }
                 Commands::Remove { git } => {
-                    PJApp::new().remove(git.as_str());
+                    PjiApp::new().remove(git.as_str());
                 }
                 Commands::List => {
-                    PJApp::new().list();
+                    PjiApp::new().list();
                 }
                 Commands::Find { query } => {
-                    PJApp::new().find(query.as_deref().unwrap_or(""));
+                    PjiApp::new().find(query.as_deref().unwrap_or(""));
                 }
                 Commands::Update => {
                     // Handle the "update" command
@@ -94,7 +94,7 @@ fn main() {
                     let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
                     match open_cmd {
                         OpenCommands::Home(home) => {
-                            PJApp::new().open_home(home.url);
+                            PjiApp::new().open_home(home.url);
                         }
                         OpenCommands::PR { number } => {
                             // Handle the "merge_request" subcommand

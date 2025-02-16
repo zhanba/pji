@@ -11,11 +11,11 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize)]
-pub struct PJConfig {
+pub struct PjiConfig {
     pub root: PathBuf,
 }
 
-impl Default for PJConfig {
+impl Default for PjiConfig {
     fn default() -> Self {
         Self {
             root: UserDirs::new()
@@ -26,7 +26,7 @@ impl Default for PJConfig {
     }
 }
 
-impl PJConfig {
+impl PjiConfig {
     pub fn load() -> Self {
         confy::load(APP_NAME, APP_CONFIG_NAME).expect("should read config file success")
     }
@@ -65,12 +65,12 @@ pub struct GitURI {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct PJRepo {
+pub struct PjiRepo {
     pub git_uri: GitURI,
     pub dir: String,
 }
 
-impl PJRepo {
+impl PjiRepo {
     pub fn new(repo_uri: &str, root: &PathBuf) -> Self {
         let git_uri =
             parse_git_url(repo_uri).expect(format!("Invalid git repo: {}", repo_uri).as_str());
@@ -109,12 +109,12 @@ impl PJRepo {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PJMetadata {
+pub struct PjiMetadata {
     version: String,
-    repos: Vec<PJRepo>,
+    repos: Vec<PjiRepo>,
 }
 
-impl Default for PJMetadata {
+impl Default for PjiMetadata {
     fn default() -> Self {
         Self {
             version: APP_METADATA_VERSION_V1.to_string(),
@@ -123,7 +123,7 @@ impl Default for PJMetadata {
     }
 }
 
-impl PJMetadata {
+impl PjiMetadata {
     pub fn load() -> Self {
         confy::load(APP_NAME, APP_DATA_NAME).expect("should read config file success")
     }
@@ -132,24 +132,24 @@ impl PJMetadata {
         confy::store(APP_NAME, APP_DATA_NAME, self).expect("should write config file success");
     }
 
-    pub fn add_repo(&mut self, pj_repo: &PJRepo) -> &mut Self {
+    pub fn add_repo(&mut self, pj_repo: &PjiRepo) -> &mut Self {
         self.repos.push(pj_repo.clone());
         self
     }
 
-    pub fn remove_repo(&mut self, pj_repo: &PJRepo) -> &mut Self {
+    pub fn remove_repo(&mut self, pj_repo: &PjiRepo) -> &mut Self {
         self.repos
             .retain(|repo| repo.git_uri.uri != pj_repo.git_uri.uri);
         self
     }
 
-    pub fn has_repo(&self, pj_repo: &PJRepo) -> bool {
+    pub fn has_repo(&self, pj_repo: &PjiRepo) -> bool {
         self.repos
             .iter()
             .any(|repo| repo.git_uri.uri == pj_repo.git_uri.uri)
     }
 
-    pub fn list_repos(&self) -> &Vec<PJRepo> {
+    pub fn list_repos(&self) -> &Vec<PjiRepo> {
         &self.repos
     }
 }

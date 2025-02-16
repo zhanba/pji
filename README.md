@@ -1,4 +1,4 @@
-# pj - git repo manager
+# pji - git repo manager
 
 ## Install
 
@@ -14,40 +14,40 @@ Pj provide a tree structure to manage your git projects.
 $ROOT
 |- github.com
 |  `- zhanba
-|     `- pj
+|     `- pji
 `- gitlab.com
    `- zhanba
-      `- pj
+      `- pji
 
 ```
 
 ```sh
-# init pj, choose root dir, create `~/.pj/config.yaml`
-pj init
+# init pji, choose root dir
+pji init
 
 # add a git project
-pj add xxx
+pji add xxx
 
 # remove a git project
-pj remove xxx
+pji remove xxx
 
 # list all git project
-pj list
+pji list
 
 # fuzz search git project
-pj find xxx
+pji find xxx
 
-# scan all git repo in root dir and write repo info into `~/.pj/repo.yaml`
-pj update
+# scan all git repo in root dir and write repo info to config
+pji update
 
 # check root dir and download all missing repos
-pj pull
+pji pull
 
 # open a git project in browser
-pj open
+pji open
 
 # open a git project merge request page in browser
-pj open mr
+pji open mr
 
 ```
 

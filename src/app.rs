@@ -1,4 +1,4 @@
-use crate::config::{PJConfig, PJMetadata, PJRepo};
+use crate::config::{PjiConfig, PjiMetadata, PjiRepo};
 use arboard::Clipboard;
 use comfy_table::Table;
 use dialoguer::{console::style, Confirm, FuzzySelect, Input};
@@ -8,24 +8,24 @@ use std::io::{self};
 use std::process::{Command, Stdio};
 use std::{fs::create_dir_all, path::PathBuf};
 
-pub struct PJApp {
-    config: PJConfig,
-    metadata: PJMetadata,
+pub struct PjiApp {
+    config: PjiConfig,
+    metadata: PjiMetadata,
 }
 
-impl PJApp {
+impl PjiApp {
     pub fn new() -> Self {
-        let config = PJConfig::load();
-        let metadata = PJMetadata::load();
+        let config = PjiConfig::load();
+        let metadata = PjiMetadata::load();
         Self { config, metadata }
     }
 
     pub fn init() {
         let config_file_apth =
-            PJConfig::get_config_file_path().expect("should get config file path success");
+            PjiConfig::get_config_file_path().expect("should get config file path success");
         if config_file_apth.exists() {
             let confirmation = Self::confirm(&format!(
-                "PJ config file {} already exists, do you want to continue?",
+                "config file {} already exists, do you want to continue?",
                 config_file_apth.display()
             ));
             if !confirmation {
@@ -34,8 +34,8 @@ impl PJApp {
         }
 
         let name: String = Input::new()
-            .with_prompt("Input pj root dir")
-            .default(PJConfig::default().root.to_string_lossy().to_string())
+            .with_prompt("Input pji root dir")
+            .default(PjiConfig::default().root.to_string_lossy().to_string())
             .interact_text()
             .unwrap();
         let path = PathBuf::new().join(name);
@@ -46,13 +46,13 @@ impl PJApp {
             print!("done\n");
         }
 
-        let mut cfg = PJConfig::default();
+        let mut cfg = PjiConfig::default();
         cfg.root = path;
         cfg.save().expect("should save config file success");
     }
 
     pub fn add(&mut self, repo: &str) {
-        let repo = PJRepo::new(repo, &self.config.root);
+        let repo = PjiRepo::new(repo, &self.config.root);
         if self.metadata.has_repo(&repo) {
             Self::warn_message(&format!("repo {} already exists", repo.git_uri.uri));
             return;
@@ -68,7 +68,7 @@ impl PJApp {
     }
 
     pub fn remove(&mut self, repo: &str) {
-        let repo = PJRepo::new(repo, &self.config.root);
+        let repo = PjiRepo::new(repo, &self.config.root);
         if !self.metadata.has_repo(&repo) {
             Self::warn_message(&format!("repo {} not exists", repo.git_uri.uri));
             return;
@@ -150,7 +150,7 @@ impl PJApp {
         Ok(())
     }
 
-    fn find_repo(&self, prompt: &str, query: &str) -> Option<&PJRepo> {
+    fn find_repo(&self, prompt: &str, query: &str) -> Option<&PjiRepo> {
         let items = self
             .metadata
             .list_repos()
