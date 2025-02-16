@@ -3,12 +3,12 @@
 ## Install
 
 ```
-cargo install pjs
+cargo install pji
 ```
 
 ## Usage
 
-Pj provide a tree structure to manage your git projects.
+pji provide a tree structure to manage your git projects.
 
 ```
 $ROOT
