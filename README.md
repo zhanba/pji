@@ -8,7 +8,42 @@ cargo install pji
 
 ## Usage
 
+pji commands
+
+```
 pji provide a tree structure to manage your git projects.
+
+Usage: pji [COMMAND]
+
+Commands:
+  init    select root directory for your repos and create a pji config file
+  add     add a git project
+  remove  remove a git project
+  list    list all git projects
+  find    fuzz search git projects
+  update  scan all git repo in root dir and save repo info
+  pull    check root dir and download all missing repos
+  open    open a git project home page in browser
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+pji open commands
+
+```
+open a git project home page in browser
+
+Usage: pji open [URL]
+       pji open home [URL]
+       pji open pr [NUMBER]
+       pji open issue [NUMBER]
+       pji open help [COMMAND]...
+```
+
+pji tree structure
 
 ```
 $ROOT
@@ -18,36 +53,6 @@ $ROOT
 `- gitlab.com
    `- zhanba
       `- pji
-
-```
-
-```sh
-# init pji, choose root dir
-pji init
-
-# add a git project
-pji add xxx
-
-# remove a git project
-pji remove xxx
-
-# list all git project
-pji list
-
-# fuzz search git project
-pji find xxx
-
-# scan all git repo in root dir and write repo info to config
-pji update
-
-# check root dir and download all missing repos
-pji pull
-
-# open a git project in browser
-pji open
-
-# open a git project merge request page in browser
-pji open mr
 
 ```
 

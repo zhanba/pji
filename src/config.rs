@@ -91,7 +91,7 @@ impl PjiRepo {
         }
     }
 
-    pub fn get_issue_url(&self, issue: Option<&str>) -> Option<String> {
+    pub fn get_issue_url(&self, issue: Option<u32>) -> Option<String> {
         match self.git_uri.hostname.as_str() {
             "github.com" => match issue {
                 Some(issue) => Some(format!(
@@ -99,7 +99,23 @@ impl PjiRepo {
                     self.git_uri.user, self.git_uri.repo, issue
                 )),
                 None => Some(format!(
-                    "https://github.com/{}/{}",
+                    "https://github.com/{}/{}/issues",
+                    self.git_uri.user, self.git_uri.repo
+                )),
+            },
+            _ => None,
+        }
+    }
+
+    pub fn get_pr_url(&self, pr: Option<u32>) -> Option<String> {
+        match self.git_uri.hostname.as_str() {
+            "github.com" => match pr {
+                Some(pr) => Some(format!(
+                    "https://github.com/{}/{}/pull/{}",
+                    self.git_uri.user, self.git_uri.repo, pr
+                )),
+                None => Some(format!(
+                    "https://github.com/{}/{}/pull",
                     self.git_uri.user, self.git_uri.repo
                 )),
             },

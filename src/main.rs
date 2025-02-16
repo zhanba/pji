@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use pji::app::PjiApp;
 
-/// Pj provide a tree structure to manage your git projects.
+/// pji provide a tree structure to manage your git projects.
 #[derive(Debug, Parser)]
 #[command(name = "pji")]
 #[command(version, about = "pji provide a tree structure to manage your git projects.", long_about = None)]
@@ -12,27 +12,27 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// init pji: select root dir, create a new config file at `~/.pji/config.toml`
+    /// select root directory for your repos and create a pji config file
     Init,
     /// add a git project
     Add {
-        /// git project to add
+        /// git project url
         git: String,
     },
     /// remove a git project
     Remove {
-        /// git project to remove
+        /// git project url
         git: String,
     },
     /// list all git projects
     List,
-    /// fuzz search git project
+    /// fuzz search git projects
     Find { query: Option<String> },
-    ///  scan all git repo in root dir and write repo info into `~/.pji/repo.toml`
+    /// scan all git repo in root dir and save repo info
     Update,
     /// check root dir and download all missing repos
     Pull,
-    /// open a git project page in browser
+    /// open a git project home page in browser
     Open(OpenArgs),
 }
 
@@ -48,13 +48,23 @@ struct OpenArgs {
 
 #[derive(Debug, Subcommand)]
 enum OpenCommands {
+    /// open a git project home page in browser
     Home(OpenHomeArgs),
-    PR { number: Option<u32> },
-    Issue { number: Option<u32> },
+    /// open a git project pull request page in browser
+    PR {
+        /// pull request number
+        number: Option<u32>,
+    },
+    /// open a git project issue page in browser
+    Issue {
+        /// issue number
+        number: Option<u32>,
+    },
 }
 
 #[derive(Debug, Args)]
 struct OpenHomeArgs {
+    /// git project name. If it's empty pji will open project based on current directory
     url: Option<String>,
 }
 
@@ -88,21 +98,16 @@ fn main() {
                     println!("Pulling git projects...");
                 }
                 Commands::Open(args) => {
-                    // Handle the "open" command
-                    println!("Opening git project: {:?}", args.home);
-
                     let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
                     match open_cmd {
                         OpenCommands::Home(home) => {
                             PjiApp::new().open_home(home.url);
                         }
                         OpenCommands::PR { number } => {
-                            // Handle the "merge_request" subcommand
-                            println!("Opening merge request: {:?}", number);
+                            PjiApp::new().open_pr(number);
                         }
                         OpenCommands::Issue { number } => {
-                            // Handle the "issue" subcommand
-                            println!("Opening issue: {:?}", number);
+                            PjiApp::new().open_issue(number);
                         }
                     }
                 }
@@ -113,6 +118,4 @@ fn main() {
             println!("No command provided");
         }
     }
-
-    // Continued program logic goes here...
 }

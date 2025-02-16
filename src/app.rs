@@ -116,16 +116,51 @@ impl PjiApp {
         Self::copy_to_clipboard(&format!("cd {}", repo_dir));
     }
 
-    pub fn open_home(&self, url: Option<String>) {
-        let query =
-            url.unwrap_or_else(|| env::current_dir().unwrap().to_string_lossy().to_string());
-        let repo = self
-            .find_repo("Enter repo name to open: ", &query)
-            .expect("repo not found");
+    pub fn open_home(&self, query: Option<String>) {
+        let repo = match query {
+            Some(query) => self
+                .find_repo("Enter repo name to open: ", &query)
+                .expect("repo not found"),
+            None => self
+                .get_cwd_repo()
+                .expect("No repo found in current directory"),
+        };
+
         let url = repo
             .get_home_url()
             .expect(&format!("No home URL found for {}", repo.git_uri.uri));
         Self::open_url(&url);
+    }
+
+    pub fn open_pr(&self, pr: Option<u32>) {
+        let repo = self
+            .get_cwd_repo()
+            .expect("No repo found in current directory");
+
+        let url = repo
+            .get_pr_url(pr)
+            .expect(&format!("No PR found for {}", repo.git_uri.uri));
+        Self::open_url(&url);
+    }
+
+    pub fn open_issue(&self, issue: Option<u32>) {
+        let repo = self
+            .get_cwd_repo()
+            .expect("No repo found in current directory");
+        let url = repo
+            .get_issue_url(issue)
+            .expect(&format!("No issue found for {}", repo.git_uri.uri));
+        Self::open_url(&url);
+    }
+
+    fn get_cwd_repo(&self) -> Option<&PjiRepo> {
+        let cwd = env::current_dir().ok()?;
+        let repo = self
+            .metadata
+            .list_repos()
+            .iter()
+            .find(|repo| cwd.starts_with(&repo.dir));
+        repo
     }
 
     fn open_url(url: &str) {
