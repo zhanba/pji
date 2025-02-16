@@ -2,6 +2,12 @@
 name = "pji"
 version = "0.1.0"
 edition = "2021"
+authors = ["zhanba c5e1856@gmail.com"]
+description = "pji provide a tree structure to manage your git projects."
+license = "MIT"
+repository = "https://github.com/zhanba/pji"
+keywords = ["git", "repo", "manager", "project", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 arboard = "3.4.1"
