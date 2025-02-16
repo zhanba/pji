@@ -80,6 +80,32 @@ impl PJRepo {
             dir: repo_dir.to_string_lossy().to_string(),
         }
     }
+
+    pub fn get_home_url(&self) -> Option<String> {
+        match self.git_uri.hostname.as_str() {
+            "github.com" => Some(format!(
+                "https://github.com/{}/{}",
+                self.git_uri.user, self.git_uri.repo
+            )),
+            _ => None,
+        }
+    }
+
+    pub fn get_issue_url(&self, issue: Option<&str>) -> Option<String> {
+        match self.git_uri.hostname.as_str() {
+            "github.com" => match issue {
+                Some(issue) => Some(format!(
+                    "https://github.com/{}/{}/issues/{}",
+                    self.git_uri.user, self.git_uri.repo, issue
+                )),
+                None => Some(format!(
+                    "https://github.com/{}/{}",
+                    self.git_uri.user, self.git_uri.repo
+                )),
+            },
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]

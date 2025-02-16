@@ -2,6 +2,7 @@ use crate::config::{PJConfig, PJMetadata, PJRepo};
 use arboard::Clipboard;
 use comfy_table::Table;
 use dialoguer::{console::style, Confirm, FuzzySelect, Input};
+use std::env;
 use std::fs::remove_dir_all;
 use std::io::{self};
 use std::process::{Command, Stdio};
@@ -23,7 +24,7 @@ impl PJApp {
         let config_file_apth =
             PJConfig::get_config_file_path().expect("should get config file path success");
         if config_file_apth.exists() {
-            let confirmation = PJApp::confirm(&format!(
+            let confirmation = Self::confirm(&format!(
                 "PJ config file {} already exists, do you want to continue?",
                 config_file_apth.display()
             ));
@@ -53,23 +54,26 @@ impl PJApp {
     pub fn add(&mut self, repo: &str) {
         let repo = PJRepo::new(repo, &self.config.root);
         if self.metadata.has_repo(&repo) {
-            PJApp::warn_message(&format!("repo {} already exists", repo.git_uri.uri));
+            Self::warn_message(&format!("repo {} already exists", repo.git_uri.uri));
             return;
         }
         create_dir_all(&repo.dir).expect("should create repo dir success");
-        PJApp::clone_repo(&repo.git_uri.uri, &repo.dir).expect("should clone repo success");
+        Self::clone_repo(&repo.git_uri.uri, &repo.dir).expect("should clone repo success");
         self.metadata.add_repo(&repo).save();
-        PJApp::success_message(&format!("Added repo {} success", &repo.git_uri.uri));
-        PJApp::copy_to_clipboard(&format!("cd {}", repo.dir));
+        Self::success_message(&format!(
+            "Added repo {} to {} success",
+            &repo.git_uri.uri, &repo.dir
+        ));
+        Self::copy_to_clipboard(&format!("cd {}", repo.dir));
     }
 
     pub fn remove(&mut self, repo: &str) {
         let repo = PJRepo::new(repo, &self.config.root);
         if !self.metadata.has_repo(&repo) {
-            PJApp::warn_message(&format!("repo {} not exists", repo.git_uri.uri));
+            Self::warn_message(&format!("repo {} not exists", repo.git_uri.uri));
             return;
         }
-        let confirmation = PJApp::confirm(&format!(
+        let confirmation = Self::confirm(&format!(
             "Are you sure to remove repo {}?",
             repo.git_uri.uri
         ));
@@ -78,7 +82,10 @@ impl PJApp {
         }
         remove_dir_all(&repo.dir).expect("should remove repo dir success");
         self.metadata.remove_repo(&repo).save();
-        PJApp::success_message(&format!("Removed repo {} success", &repo.git_uri.uri));
+        Self::success_message(&format!(
+            "Removed repo {} from {} success",
+            &repo.git_uri.uri, &repo.dir
+        ));
     }
 
     pub fn list(&self) {
@@ -100,24 +107,30 @@ impl PJApp {
     }
 
     pub fn find(&self, query: &str) {
-        let items = self
-            .metadata
-            .list_repos()
-            .iter()
-            .map(|repo| repo.dir.clone())
-            .collect::<Vec<String>>();
+        let repo = self
+            .find_repo("Enter repo name to search: ", query)
+            .expect("repo not found");
+        let repo_dir = repo.dir.clone();
 
-        let selection = FuzzySelect::new()
-            .with_prompt("Input repo name to search: ")
-            .with_initial_text(query)
-            .highlight_matches(true)
-            .max_length(10)
-            .items(&items)
-            .interact()
-            .unwrap();
+        println!("You choose: {}", repo_dir);
+        Self::copy_to_clipboard(&format!("cd {}", repo_dir));
+    }
 
-        println!("You choose: {}", items[selection]);
-        PJApp::copy_to_clipboard(&format!("cd {}", items[selection]));
+    pub fn open_home(&self, url: Option<String>) {
+        let query =
+            url.unwrap_or_else(|| env::current_dir().unwrap().to_string_lossy().to_string());
+        let repo = self
+            .find_repo("Enter repo name to open: ", &query)
+            .expect("repo not found");
+        let url = repo
+            .get_home_url()
+            .expect(&format!("No home URL found for {}", repo.git_uri.uri));
+        Self::open_url(&url);
+    }
+
+    fn open_url(url: &str) {
+        webbrowser::open(url).expect("Failed to open browser");
+        println!("Opening URL: {}", url);
     }
 
     fn clone_repo(repo: &str, dir: &str) -> io::Result<()> {
@@ -135,6 +148,31 @@ impl PJApp {
             return Err(io::Error::new(io::ErrorKind::Other, "git clone failed"));
         }
         Ok(())
+    }
+
+    fn find_repo(&self, prompt: &str, query: &str) -> Option<&PJRepo> {
+        let items = self
+            .metadata
+            .list_repos()
+            .iter()
+            .map(|repo| repo.dir.clone())
+            .collect::<Vec<String>>();
+
+        let selection = FuzzySelect::new()
+            .with_prompt(prompt)
+            .with_initial_text(query)
+            .default(0)
+            .highlight_matches(true)
+            .max_length(10)
+            .items(&items)
+            .interact()
+            .unwrap();
+
+        let repo_dir = &items[selection];
+        self.metadata
+            .list_repos()
+            .iter()
+            .find(|repo| repo.dir == *repo_dir)
     }
 
     fn success_message(message: &str) {

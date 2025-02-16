@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use pj::app::PJApp;
+use pjs::app::PJApp;
 
 /// Pj provide a tree structure to manage your git projects.
 #[derive(Debug, Parser)]
@@ -49,19 +49,12 @@ struct OpenArgs {
 #[derive(Debug, Subcommand)]
 enum OpenCommands {
     Home(OpenHomeArgs),
-    MergeRequest {
-        #[arg(short, long)]
-        number: Option<u32>,
-    },
-    Issue {
-        #[arg(short, long)]
-        number: Option<u32>,
-    },
+    PR { number: Option<u32> },
+    Issue { number: Option<u32> },
 }
 
 #[derive(Debug, Args)]
 struct OpenHomeArgs {
-    #[arg(short, long)]
     url: Option<String>,
 }
 
@@ -101,10 +94,9 @@ fn main() {
                     let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
                     match open_cmd {
                         OpenCommands::Home(home) => {
-                            // Handle the "home" subcommand
-                            println!("Opening git project home: {:?}", home);
+                            PJApp::new().open_home(home.url);
                         }
-                        OpenCommands::MergeRequest { number } => {
+                        OpenCommands::PR { number } => {
                             // Handle the "merge_request" subcommand
                             println!("Opening merge request: {:?}", number);
                         }
