@@ -3,7 +3,7 @@
 ## Install
 
 ```
-cargo install pj
+cargo install pjs
 ```
 
 ## Usage
@@ -20,7 +20,6 @@ $ROOT
       `- pj
 
 ```
-
 
 ```sh
 # init pj, choose root dir, create `~/.pj/config.yaml`
