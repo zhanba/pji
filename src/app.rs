@@ -1,4 +1,5 @@
-use crate::config::{PjiConfig, PjiMetadata, PjiRepo};
+use crate::config::{PjiConfig, PjiMetadata};
+use crate::repo::PjiRepo;
 use arboard::Clipboard;
 use comfy_table::Table;
 use dialoguer::{console::style, Confirm, FuzzySelect, Input};
@@ -93,30 +94,30 @@ impl PjiApp {
         table.set_header(vec![
             "dir", "protocol", "hostname", "user", "repo", "full uri",
         ]);
-        self.metadata.list_repos().iter().for_each(|repo| {
+        self.metadata.repos.iter().for_each(|repo| {
             table.add_row(vec![
-                repo.dir.clone(),
-                repo.git_uri.protocol.as_str().to_string(),
-                repo.git_uri.hostname.clone(),
-                repo.git_uri.user.clone(),
-                repo.git_uri.repo.clone(),
-                repo.git_uri.uri.clone(),
+                &repo.dir,
+                repo.git_uri.protocol.as_str(),
+                &repo.git_uri.hostname,
+                &repo.git_uri.user,
+                &repo.git_uri.repo,
+                &repo.git_uri.uri,
             ]);
         });
         println!("{table}");
     }
 
-    pub fn find(&self, query: &str) {
+    pub fn find(&mut self, query: &str) {
         let repo = self
             .find_repo("Enter repo name to search: ", query)
             .expect("repo not found");
-        let repo_dir = repo.dir.clone();
-
+        repo.update_open_time();
+        let repo_dir = &repo.dir;
         println!("You choose: {}", repo_dir);
         Self::copy_to_clipboard(&format!("cd {}", repo_dir));
     }
 
-    pub fn open_home(&self, query: Option<String>) {
+    pub fn open_home(&mut self, query: Option<String>) {
         let repo = match query {
             Some(query) => self
                 .find_repo("Enter repo name to open: ", &query)
@@ -157,7 +158,7 @@ impl PjiApp {
         let cwd = env::current_dir().ok()?;
         let repo = self
             .metadata
-            .list_repos()
+            .repos
             .iter()
             .find(|repo| cwd.starts_with(&repo.dir));
         repo
@@ -185,11 +186,11 @@ impl PjiApp {
         Ok(())
     }
 
-    fn find_repo(&self, prompt: &str, query: &str) -> Option<&PjiRepo> {
+    fn find_repo(&mut self, prompt: &str, query: &str) -> Option<&mut PjiRepo> {
         let items = self
             .metadata
-            .list_repos()
-            .iter()
+            .repos
+            .iter_mut()
             .map(|repo| repo.dir.clone())
             .collect::<Vec<String>>();
 
@@ -205,8 +206,8 @@ impl PjiApp {
 
         let repo_dir = &items[selection];
         self.metadata
-            .list_repos()
-            .iter()
+            .repos
+            .iter_mut()
             .find(|repo| repo.dir == *repo_dir)
     }
 

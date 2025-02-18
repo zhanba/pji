@@ -1,4 +1,4 @@
-use crate::config::{GitProtocol, GitURI};
+use crate::repo::{GitProtocol, GitURI};
 use regex::Regex;
 
 pub fn parse_git_url(url: &str) -> Option<GitURI> {
