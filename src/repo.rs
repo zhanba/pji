@@ -30,7 +30,8 @@ pub struct GitURI {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PjiRepo {
     pub git_uri: GitURI,
-    pub dir: String,
+    pub dir: PathBuf,
+    pub root: PathBuf,
     pub create_time: DateTime<Utc>,
     pub last_open_time: DateTime<Utc>,
 }
@@ -42,7 +43,8 @@ impl PjiRepo {
         let repo_dir = root.join(&git_uri.user).join(&git_uri.repo);
         Self {
             git_uri,
-            dir: repo_dir.to_string_lossy().to_string(),
+            dir: repo_dir,
+            root: root.clone(),
             create_time: Utc::now(),
             last_open_time: Utc::now(),
         }

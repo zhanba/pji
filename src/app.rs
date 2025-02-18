@@ -2,7 +2,7 @@ use crate::config::{PjiConfig, PjiMetadata};
 use crate::repo::PjiRepo;
 use arboard::Clipboard;
 use comfy_table::Table;
-use dialoguer::{console::style, Confirm, FuzzySelect, Input};
+use dialoguer::{console::style, Confirm, FuzzySelect, Input, Select};
 use std::env;
 use std::fs::remove_dir_all;
 use std::io::{self};
@@ -21,55 +21,78 @@ impl PjiApp {
         Self { config, metadata }
     }
 
-    pub fn init() {
-        let config_file_apth =
-            PjiConfig::get_config_file_path().expect("should get config file path success");
-        if config_file_apth.exists() {
-            let confirmation = Self::confirm(&format!(
-                "config file {} already exists, do you want to continue?",
-                config_file_apth.display()
-            ));
-            if !confirmation {
-                return;
-            }
-        }
+    pub fn start_config(&mut self) {
+        self.add_root();
+    }
 
+    fn add_root(&mut self) -> &PathBuf {
         let name: String = Input::new()
             .with_prompt("Input pji root dir")
-            .default(PjiConfig::default().root.to_string_lossy().to_string())
+            .default(PjiConfig::get_default_root().display().to_string())
             .interact_text()
             .unwrap();
-        let path = PathBuf::new().join(name);
-
-        if !path.exists() {
-            print!("{} not exists, creating...", path.display());
-            create_dir_all(&path).expect("should create dir success");
-            print!("done\n");
+        let path = PathBuf::from(&name);
+        let has_root = self.config.roots.contains(&path);
+        if has_root {
+            println!("{} already exists, please choose another one", name);
+            self.add_root()
+        } else {
+            if !path.exists() {
+                print!("{} not exists, creating...", path.display());
+                create_dir_all(&path).expect("should create dir success");
+                print!("done\n");
+            }
+            self.config.roots.push(path);
+            self.config.save().expect("should save config file success");
+            self.config.roots.last().unwrap()
         }
+    }
 
-        let mut cfg = PjiConfig::default();
-        cfg.root = path;
-        cfg.save().expect("should save config file success");
+    fn get_working_root(&mut self) -> &PathBuf {
+        let len = self.config.roots.len();
+        if len == 0 {
+            println!("no root exists, please add one");
+            self.add_root()
+        } else if len == 1 {
+            &self.config.roots[0]
+        } else {
+            let items = self
+                .config
+                .roots
+                .iter()
+                .map(|x| x.display().to_string())
+                .collect::<Vec<_>>();
+            let selection = Select::new()
+                .with_prompt("Choose root to work with:")
+                .default(0)
+                .items(&items)
+                .interact()
+                .unwrap();
+            &self.config.roots[selection]
+        }
     }
 
     pub fn add(&mut self, repo: &str) {
-        let repo = PjiRepo::new(repo, &self.config.root);
+        let root = self.get_working_root();
+        let repo = PjiRepo::new(repo, root);
         if self.metadata.has_repo(&repo) {
             Self::warn_message(&format!("repo {} already exists", repo.git_uri.uri));
             return;
         }
         create_dir_all(&repo.dir).expect("should create repo dir success");
-        Self::clone_repo(&repo.git_uri.uri, &repo.dir).expect("should clone repo success");
+        let repo_dir = repo.dir.display().to_string();
+        Self::clone_repo(&repo.git_uri.uri, &repo_dir).expect("should clone repo success");
         self.metadata.add_repo(&repo).save();
         Self::success_message(&format!(
             "Added repo {} to {} success",
-            &repo.git_uri.uri, &repo.dir
+            &repo.git_uri.uri, &repo_dir
         ));
-        Self::copy_to_clipboard(&format!("cd {}", repo.dir));
+        Self::copy_to_clipboard(&format!("cd {}", repo_dir));
     }
 
     pub fn remove(&mut self, repo: &str) {
-        let repo = PjiRepo::new(repo, &self.config.root);
+        let root = self.get_working_root();
+        let repo = PjiRepo::new(repo, root);
         if !self.metadata.has_repo(&repo) {
             Self::warn_message(&format!("repo {} not exists", repo.git_uri.uri));
             return;
@@ -85,7 +108,8 @@ impl PjiApp {
         self.metadata.remove_repo(&repo).save();
         Self::success_message(&format!(
             "Removed repo {} from {} success",
-            &repo.git_uri.uri, &repo.dir
+            &repo.git_uri.uri,
+            &repo.dir.display().to_string()
         ));
     }
 
@@ -96,7 +120,7 @@ impl PjiApp {
         ]);
         self.metadata.repos.iter().for_each(|repo| {
             table.add_row(vec![
-                &repo.dir,
+                &repo.dir.display().to_string(),
                 repo.git_uri.protocol.as_str(),
                 &repo.git_uri.hostname,
                 &repo.git_uri.user,
@@ -112,7 +136,7 @@ impl PjiApp {
             .find_repo("Enter repo name to search: ", query)
             .expect("repo not found");
         repo.update_open_time();
-        let repo_dir = &repo.dir;
+        let repo_dir = &repo.dir.display().to_string();
         println!("You choose: {}", repo_dir);
         Self::copy_to_clipboard(&format!("cd {}", repo_dir));
     }
@@ -191,7 +215,7 @@ impl PjiApp {
             .metadata
             .repos
             .iter_mut()
-            .map(|repo| repo.dir.clone())
+            .map(|repo| repo.dir.display().to_string())
             .collect::<Vec<String>>();
 
         let selection = FuzzySelect::new()
@@ -208,7 +232,7 @@ impl PjiApp {
         self.metadata
             .repos
             .iter_mut()
-            .find(|repo| repo.dir == *repo_dir)
+            .find(|repo| repo.dir.display().to_string() == *repo_dir)
     }
 
     fn success_message(message: &str) {

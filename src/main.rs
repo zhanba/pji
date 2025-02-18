@@ -12,8 +12,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// select root directory for your repos and create a pji config file
-    Init,
+    /// config root directory for your repos
+    Config,
     /// add a git project
     Add {
         /// git project url
@@ -29,8 +29,8 @@ enum Commands {
     /// fuzz search git projects
     Find { query: Option<String> },
     /// scan all git repo in root dir and save repo info
-    Update,
-    /// check root dir and download all missing repos
+    Scan,
+    /// download all missing repos
     Pull,
     /// open a git project home page in browser
     Open(OpenArgs),
@@ -74,8 +74,8 @@ fn main() {
     match cli.command {
         Some(command) => {
             match command {
-                Commands::Init => {
-                    PjiApp::init();
+                Commands::Config => {
+                    PjiApp::new().start_config();
                 }
                 Commands::Add { git } => {
                     PjiApp::new().add(git.as_str());
@@ -89,7 +89,7 @@ fn main() {
                 Commands::Find { query } => {
                     PjiApp::new().find(query.as_deref().unwrap_or(""));
                 }
-                Commands::Update => {
+                Commands::Scan => {
                     // Handle the "update" command
                     println!("Updating git projects...");
                 }

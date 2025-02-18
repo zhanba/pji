@@ -12,27 +12,32 @@ use crate::{
 
 #[derive(Serialize, Deserialize)]
 pub struct PjiConfig {
-    pub root: PathBuf,
+    pub roots: Vec<PathBuf>,
 }
 
 impl Default for PjiConfig {
     fn default() -> Self {
         Self {
-            root: UserDirs::new()
-                .unwrap()
-                .home_dir()
-                .join(DEFAULT_WORKSPACE_NAME),
+            roots: vec![Self::get_default_root()],
         }
     }
 }
 
 impl PjiConfig {
+    // load or init with default value
     pub fn load() -> Self {
         confy::load(APP_NAME, APP_CONFIG_NAME).expect("should read config file success")
     }
 
     pub fn get_config_file_path() -> Result<PathBuf, ConfyError> {
         get_configuration_file_path(APP_NAME, APP_CONFIG_NAME)
+    }
+
+    pub fn get_default_root() -> PathBuf {
+        UserDirs::new()
+            .expect("should get home dir")
+            .home_dir()
+            .join(DEFAULT_WORKSPACE_NAME)
     }
 
     pub fn save(&self) -> Result<(), ConfyError> {
@@ -56,6 +61,7 @@ impl Default for PjiMetadata {
 }
 
 impl PjiMetadata {
+    // load or init with default value
     pub fn load() -> Self {
         confy::load(APP_NAME, APP_DATA_NAME).expect("should read config file success")
     }
@@ -71,13 +77,13 @@ impl PjiMetadata {
 
     pub fn remove_repo(&mut self, pj_repo: &PjiRepo) -> &mut Self {
         self.repos
-            .retain(|repo| repo.git_uri.uri != pj_repo.git_uri.uri);
+            .retain(|repo| repo.git_uri.uri != pj_repo.git_uri.uri && repo.root == pj_repo.root);
         self
     }
 
     pub fn has_repo(&self, pj_repo: &PjiRepo) -> bool {
         self.repos
             .iter()
-            .any(|repo| repo.git_uri.uri == pj_repo.git_uri.uri)
+            .any(|repo| repo.git_uri.uri == pj_repo.git_uri.uri && repo.root == pj_repo.root)
     }
 }
