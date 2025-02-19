@@ -70,6 +70,10 @@ impl PjiMetadata {
         confy::store(APP_NAME, APP_DATA_NAME, self).expect("should write config file success");
     }
 
+    pub fn get_metadata_file_path() -> Result<PathBuf, ConfyError> {
+        get_configuration_file_path(APP_NAME, APP_DATA_NAME)
+    }
+
     pub fn add_repo(&mut self, pj_repo: &PjiRepo) -> &mut Self {
         self.repos.push(pj_repo.clone());
         self

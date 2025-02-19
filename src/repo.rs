@@ -40,7 +40,10 @@ impl PjiRepo {
     pub fn new(repo_uri: &str, root: &PathBuf) -> Self {
         let git_uri =
             parse_git_url(repo_uri).expect(format!("Invalid git repo: {}", repo_uri).as_str());
-        let repo_dir = root.join(&git_uri.user).join(&git_uri.repo);
+        let repo_dir = root
+            .join(&git_uri.hostname)
+            .join(&git_uri.user)
+            .join(&git_uri.repo);
         Self {
             git_uri,
             dir: repo_dir,

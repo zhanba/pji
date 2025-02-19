@@ -1,11 +1,12 @@
 use crate::config::{PjiConfig, PjiMetadata};
 use crate::repo::PjiRepo;
+use crate::util::{list_dir, try_get_repo_from_dir};
 use arboard::Clipboard;
 use comfy_table::Table;
 use dialoguer::{console::style, Confirm, FuzzySelect, Input, Select};
 use std::env;
-use std::fs::remove_dir_all;
-use std::io::{self};
+use std::fs::{remove_dir_all, remove_file};
+use std::io;
 use std::process::{Command, Stdio};
 use std::{fs::create_dir_all, path::PathBuf};
 
@@ -63,7 +64,7 @@ impl PjiApp {
                 .map(|x| x.display().to_string())
                 .collect::<Vec<_>>();
             let selection = Select::new()
-                .with_prompt("Choose root to work with:")
+                .with_prompt("Choose root to use")
                 .default(0)
                 .items(&items)
                 .interact()
@@ -113,15 +114,15 @@ impl PjiApp {
         ));
     }
 
-    pub fn list(&self) {
+    pub fn list(&mut self) {
         let mut table = Table::new();
-        table.set_header(vec![
-            "dir", "protocol", "hostname", "user", "repo", "full uri",
-        ]);
+        table.set_header(vec!["dir", "hostname", "user", "repo", "full uri"]);
+        self.metadata
+            .repos
+            .sort_by(|a, b| b.last_open_time.cmp(&a.last_open_time));
         self.metadata.repos.iter().for_each(|repo| {
             table.add_row(vec![
                 &repo.dir.display().to_string(),
-                repo.git_uri.protocol.as_str(),
                 &repo.git_uri.hostname,
                 &repo.git_uri.user,
                 &repo.git_uri.repo,
@@ -139,6 +140,62 @@ impl PjiApp {
         let repo_dir = &repo.dir.display().to_string();
         println!("You choose: {}", repo_dir);
         Self::copy_to_clipboard(&format!("cd {}", repo_dir));
+    }
+
+    pub fn scan(&mut self) {
+        for root in self.config.roots.as_slice() {
+            println!("Scanning {}", root.display());
+            if let Some(repos) = Self::get_repos_from_root(&root) {
+                for repo in repos {
+                    println!("Found repo: {}", repo.dir.display());
+                    if !(self.metadata.has_repo(&repo)) {
+                        println!("Found new repo: {}", repo.dir.display());
+                        self.metadata.repos.push(repo);
+                    }
+                }
+            }
+        }
+        self.metadata.save();
+    }
+
+    pub fn clean() {
+        if let Ok(config_path) = PjiConfig::get_config_file_path() {
+            remove_file(config_path).expect("Failed to remove config file");
+        }
+
+        if let Ok(metadata_path) = PjiMetadata::get_metadata_file_path() {
+            remove_file(metadata_path).expect("Failed to remove metadata file");
+        }
+
+        Self::success_message("Cleaned up");
+    }
+
+    fn get_repos_from_root(root: &PathBuf) -> Option<Vec<PjiRepo>> {
+        if !root.is_dir() {
+            return None;
+        }
+        let mut repos = vec![];
+        if let Ok(hostname_dirs) = list_dir(root) {
+            for hostname_dir in hostname_dirs {
+                if let Ok(user_dirs) = list_dir(&hostname_dir) {
+                    for user_dir in user_dirs {
+                        if let Ok(repo_dirs) = list_dir(&user_dir) {
+                            for repo_dir in repo_dirs {
+                                if let Some(repo_url) = try_get_repo_from_dir(&repo_dir) {
+                                    let repo = PjiRepo::new(&repo_url, root);
+                                    if repo.dir == repo_dir {
+                                        repos.push(repo);
+                                    } else {
+                                        println!("{} is not a valid pji repo", repo_dir.display());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(repos)
     }
 
     pub fn open_home(&mut self, query: Option<String>) {
@@ -211,6 +268,10 @@ impl PjiApp {
     }
 
     fn find_repo(&mut self, prompt: &str, query: &str) -> Option<&mut PjiRepo> {
+        self.metadata
+            .repos
+            .sort_by(|a, b| b.last_open_time.cmp(&a.last_open_time));
+
         let items = self
             .metadata
             .repos

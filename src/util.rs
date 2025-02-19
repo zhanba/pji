@@ -1,4 +1,7 @@
+use std::{fs::read_dir, io, path::PathBuf};
+
 use crate::repo::{GitProtocol, GitURI};
+use git2::Repository;
 use regex::Regex;
 
 pub fn parse_git_url(url: &str) -> Option<GitURI> {
@@ -34,4 +37,27 @@ pub fn parse_git_url(url: &str) -> Option<GitURI> {
     } else {
         None
     }
+}
+
+pub fn try_get_repo_from_dir(dir: &PathBuf) -> Option<String> {
+    if let Ok(repo) = Repository::open(&dir) {
+        if let Some(remote) = repo.find_remote("origin").ok() {
+            if let Some(url) = remote.url() {
+                return Some(url.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn list_dir(dir: &PathBuf) -> io::Result<Vec<PathBuf>> {
+    let mut dirs = vec![];
+    for entry in read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            dirs.push(path);
+        }
+    }
+    Ok(dirs)
 }

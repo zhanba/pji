@@ -30,8 +30,8 @@ enum Commands {
     Find { query: Option<String> },
     /// scan all git repo in root dir and save repo info
     Scan,
-    /// download all missing repos
-    Pull,
+    /// clean pji metadata and config
+    Clean,
     /// open a git project home page in browser
     Open(OpenArgs),
 }
@@ -72,47 +72,41 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(command) => {
-            match command {
-                Commands::Config => {
-                    PjiApp::new().start_config();
-                }
-                Commands::Add { git } => {
-                    PjiApp::new().add(git.as_str());
-                }
-                Commands::Remove { git } => {
-                    PjiApp::new().remove(git.as_str());
-                }
-                Commands::List => {
-                    PjiApp::new().list();
-                }
-                Commands::Find { query } => {
-                    PjiApp::new().find(query.as_deref().unwrap_or(""));
-                }
-                Commands::Scan => {
-                    // Handle the "update" command
-                    println!("Updating git projects...");
-                }
-                Commands::Pull => {
-                    // Handle the "pull" command
-                    println!("Pulling git projects...");
-                }
-                Commands::Open(args) => {
-                    let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
-                    match open_cmd {
-                        OpenCommands::Home(home) => {
-                            PjiApp::new().open_home(home.url);
-                        }
-                        OpenCommands::PR { number } => {
-                            PjiApp::new().open_pr(number);
-                        }
-                        OpenCommands::Issue { number } => {
-                            PjiApp::new().open_issue(number);
-                        }
+        Some(command) => match command {
+            Commands::Config => {
+                PjiApp::new().start_config();
+            }
+            Commands::Add { git } => {
+                PjiApp::new().add(git.as_str());
+            }
+            Commands::Remove { git } => {
+                PjiApp::new().remove(git.as_str());
+            }
+            Commands::List => {
+                PjiApp::new().list();
+            }
+            Commands::Find { query } => {
+                PjiApp::new().find(query.as_deref().unwrap_or(""));
+            }
+            Commands::Scan => {
+                PjiApp::new().scan();
+            }
+            Commands::Clean => PjiApp::clean(),
+            Commands::Open(args) => {
+                let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
+                match open_cmd {
+                    OpenCommands::Home(home) => {
+                        PjiApp::new().open_home(home.url);
+                    }
+                    OpenCommands::PR { number } => {
+                        PjiApp::new().open_pr(number);
+                    }
+                    OpenCommands::Issue { number } => {
+                        PjiApp::new().open_issue(number);
                     }
                 }
             }
-        }
+        },
         None => {
             // Handle the default case
             println!("No command provided");
