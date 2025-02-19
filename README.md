@@ -22,7 +22,7 @@ Commands:
   list    list all git projects
   find    fuzz search git projects
   scan    scan all git repo in root dir and save repo info
-  pull    download all missing repos
+  clean   clean pji metadata and config
   open    open a git project home page in browser
   help    Print this message or the help of the given subcommand(s)
 
