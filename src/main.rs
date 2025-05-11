@@ -25,7 +25,10 @@ enum Commands {
         git: String,
     },
     /// list all git projects
-    List,
+    List {
+        #[arg(short, long)]
+        long: bool,
+    },
     /// fuzz search git projects
     Find { query: Option<String> },
     /// scan all git repo in root dir and save repo info
@@ -82,8 +85,8 @@ fn main() {
             Commands::Remove { git } => {
                 PjiApp::new().remove(git.as_str());
             }
-            Commands::List => {
-                PjiApp::new().list();
+            Commands::List { long } => {
+                PjiApp::new().list(long);
             }
             Commands::Find { query } => {
                 PjiApp::new().find(query.as_deref().unwrap_or(""));

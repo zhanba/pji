@@ -28,7 +28,7 @@ impl PjiApp {
 
     fn add_root(&mut self) -> &PathBuf {
         let name: String = Input::new()
-            .with_prompt("Input pji root dir")
+            .with_prompt("Enter the full path for the new pji root directory")
             .default(PjiConfig::get_default_root().display().to_string())
             .interact_text()
             .unwrap();
@@ -64,7 +64,7 @@ impl PjiApp {
                 .map(|x| x.display().to_string())
                 .collect::<Vec<_>>();
             let selection = Select::new()
-                .with_prompt("Choose root to use")
+                .with_prompt("Select root directory")
                 .default(0)
                 .items(&items)
                 .interact()
@@ -99,7 +99,7 @@ impl PjiApp {
             return;
         }
         let confirmation = Self::confirm(&format!(
-            "Are you sure to remove repo {}?",
+            "Remove repo {}?",
             repo.git_uri.uri
         ));
         if !confirmation {
@@ -114,27 +114,33 @@ impl PjiApp {
         ));
     }
 
-    pub fn list(&mut self) {
-        let mut table = Table::new();
-        table.set_header(vec!["dir", "hostname", "user", "repo", "full uri"]);
+    pub fn list(&mut self, long_format: bool) {
         self.metadata
             .repos
             .sort_by(|a, b| b.last_open_time.cmp(&a.last_open_time));
-        self.metadata.repos.iter().for_each(|repo| {
-            table.add_row(vec![
-                &repo.dir.display().to_string(),
-                &repo.git_uri.hostname,
-                &repo.git_uri.user,
-                &repo.git_uri.repo,
-                &repo.git_uri.uri,
-            ]);
-        });
-        println!("{table}");
+        if long_format {
+            let mut table = Table::new();
+            table.set_header(vec!["dir", "hostname", "user", "repo", "full uri"]);
+            self.metadata.repos.iter().for_each(|repo| {
+                table.add_row(vec![
+                    &repo.dir.display().to_string(),
+                    &repo.git_uri.hostname,
+                    &repo.git_uri.user,
+                    &repo.git_uri.repo,
+                    &repo.git_uri.uri,
+                ]);
+            });
+            println!("{table}");
+        } else {
+            self.metadata.repos.iter().for_each(|repo| {
+                println!("{}", repo.dir.display());
+            });
+        }
     }
 
     pub fn find(&mut self, query: &str) {
         let repo = self
-            .find_repo("Enter repo name to search: ", query)
+            .find_repo("Search repo: ", query)
             .expect("repo not found");
         repo.update_open_time();
         let repo_dir = &repo.dir.display().to_string();
@@ -201,7 +207,7 @@ impl PjiApp {
     pub fn open_home(&mut self, query: Option<String>) {
         let repo = match query {
             Some(query) => self
-                .find_repo("Enter repo name to open: ", &query)
+                .find_repo("Open repo: ", &query)
                 .expect("repo not found"),
             None => self
                 .get_cwd_repo()
