@@ -35,16 +35,23 @@ impl PjiApp {
         let path = PathBuf::from(&name);
         let has_root = self.config.roots.contains(&path);
         if has_root {
-            println!("{} already exists, please choose another one", name);
+            Self::warn_message(&format!(
+                "Root '{}' already exists. Please choose another.",
+                name
+            ));
             self.add_root()
         } else {
             if !path.exists() {
-                print!("{} not exists, creating...", path.display());
+                println!("Creating directory '{}'...", path.display());
                 create_dir_all(&path).expect("should create dir success");
-                print!("done\n");
+                Self::success_message(&format!("Directory '{}' created.", path.display()));
             }
             self.config.roots.push(path);
             self.config.save().expect("should save config file success");
+            Self::success_message(&format!(
+                "Root '{}' added successfully.",
+                self.config.roots.last().unwrap().display()
+            ));
             self.config.roots.last().unwrap()
         }
     }
@@ -52,7 +59,7 @@ impl PjiApp {
     fn get_working_root(&mut self) -> &PathBuf {
         let len = self.config.roots.len();
         if len == 0 {
-            println!("no root exists, please add one");
+            Self::warn_message("No pji roots found. Let's add one first.");
             self.add_root()
         } else if len == 1 {
             &self.config.roots[0]
@@ -73,44 +80,56 @@ impl PjiApp {
         }
     }
 
-    pub fn add(&mut self, repo: &str) {
+    pub fn add(&mut self, repo_uri_str: &str) {
         let root = self.get_working_root();
-        let repo = PjiRepo::new(repo, root);
+        let repo = PjiRepo::new(repo_uri_str, root);
         if self.metadata.has_repo(&repo) {
-            Self::warn_message(&format!("repo {} already exists", repo.git_uri.uri));
+            Self::warn_message(&format!(
+                "Repository '{}' already exists in pji.",
+                repo.git_uri.uri
+            ));
             return;
         }
         create_dir_all(&repo.dir).expect("should create repo dir success");
         let repo_dir = repo.dir.display().to_string();
+        println!("Cloning '{}' into '{}'...", repo.git_uri.uri, repo_dir);
         Self::clone_repo(&repo.git_uri.uri, &repo_dir).expect("should clone repo success");
         self.metadata.add_repo(&repo).save();
         Self::success_message(&format!(
-            "Added repo {} to {} success",
+            "✨ Repository '{}' added to '{}'.",
             &repo.git_uri.uri, &repo_dir
         ));
-        Self::copy_to_clipboard(&format!("cd {}", repo_dir));
+        Self::copy_to_clipboard(
+            &format!("cd {}", repo_dir),
+            "Paste to navigate to the repository.",
+        );
     }
 
-    pub fn remove(&mut self, repo: &str) {
+    pub fn remove(&mut self, repo_uri_str: &str) {
         let root = self.get_working_root();
-        let repo = PjiRepo::new(repo, root);
+        let repo = PjiRepo::new(repo_uri_str, root);
         if !self.metadata.has_repo(&repo) {
-            Self::warn_message(&format!("repo {} not exists", repo.git_uri.uri));
+            Self::warn_message(&format!(
+                "Repository '{}' not found in pji.",
+                repo.git_uri.uri
+            ));
             return;
         }
         let confirmation = Self::confirm(&format!(
-            "Remove repo {}?",
+            "Are you sure you want to remove the repository '{}' from disk and pji?",
             repo.git_uri.uri
         ));
         if !confirmation {
+            println!("✖️ Removal cancelled.");
             return;
         }
+        println!("Removing directory '{}'...", repo.dir.display());
         remove_dir_all(&repo.dir).expect("should remove repo dir success");
         self.metadata.remove_repo(&repo).save();
         Self::success_message(&format!(
-            "Removed repo {} from {} success",
+            "🗑️ Repository '{}' removed successfully from '{}'.",
             &repo.git_uri.uri,
-            &repo.dir.display().to_string()
+            &repo.dir.display()
         ));
     }
 
@@ -140,28 +159,45 @@ impl PjiApp {
 
     pub fn find(&mut self, query: &str) {
         let repo = self
-            .find_repo("Search repo: ", query)
+            .find_repo("🔍 Search and select repository: ", query)
             .expect("repo not found");
         repo.update_open_time();
         let repo_dir = &repo.dir.display().to_string();
-        println!("You choose: {}", repo_dir);
-        Self::copy_to_clipboard(&format!("cd {}", repo_dir));
+        Self::success_message(&format!("Selected: {}", repo_dir));
+        Self::copy_to_clipboard(
+            &format!("cd {}", repo_dir),
+            "Paste to navigate to the repository.",
+        );
     }
 
     pub fn scan(&mut self) {
+        let mut total_new_repos_added = 0;
         for root in self.config.roots.as_slice() {
-            println!("Scanning {}", root.display());
+            println!("🔍 Scanning {}...", root.display());
             if let Some(repos) = Self::get_repos_from_root(&root) {
                 for repo in repos {
-                    println!("Found repo: {}", repo.dir.display());
                     if !(self.metadata.has_repo(&repo)) {
-                        println!("Found new repo: {}", repo.dir.display());
+                        println!("  ✨ Added: {}", repo.dir.display());
                         self.metadata.repos.push(repo);
+                        total_new_repos_added += 1;
                     }
                 }
             }
         }
         self.metadata.save();
+        if total_new_repos_added > 0 {
+            let repo_str = if total_new_repos_added == 1 {
+                "repository"
+            } else {
+                "repositories"
+            };
+            Self::success_message(&format!(
+                "Scan complete. {} new {} added.",
+                total_new_repos_added, repo_str
+            ));
+        } else {
+            Self::success_message("Scan complete. No new repositories found.");
+        }
     }
 
     pub fn clean() {
@@ -173,7 +209,7 @@ impl PjiApp {
             remove_file(metadata_path).expect("Failed to remove metadata file");
         }
 
-        Self::success_message("Cleaned up");
+        Self::success_message("🧹 Project data cleaned successfully.");
     }
 
     fn get_repos_from_root(root: &PathBuf) -> Option<Vec<PjiRepo>> {
@@ -181,6 +217,8 @@ impl PjiApp {
             return None;
         }
         let mut repos = vec![];
+        let mut invalid_repo_paths: Vec<String> = Vec::new();
+
         if let Ok(hostname_dirs) = list_dir(root) {
             for hostname_dir in hostname_dirs {
                 if let Ok(user_dirs) = list_dir(&hostname_dir) {
@@ -192,13 +230,21 @@ impl PjiApp {
                                     if repo.dir == repo_dir {
                                         repos.push(repo);
                                     } else {
-                                        println!("{} is not a valid pji repo", repo_dir.display());
+                                        invalid_repo_paths.push(repo_dir.display().to_string());
                                     }
+                                } else {
+                                    invalid_repo_paths.push(repo_dir.display().to_string());
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+        if !invalid_repo_paths.is_empty() {
+            Self::warn_message("The following paths were found but are not valid pji repositories or have an unexpected structure:");
+            for path_str in invalid_repo_paths {
+                println!("  - {}", path_str);
             }
         }
         Some(repos)
@@ -252,8 +298,8 @@ impl PjiApp {
     }
 
     fn open_url(url: &str) {
+        println!("🌐 Opening URL in browser: {}", style(url).cyan());
         webbrowser::open(url).expect("Failed to open browser");
-        println!("Opening URL: {}", url);
     }
 
     fn clone_repo(repo: &str, dir: &str) -> io::Result<()> {
@@ -310,15 +356,16 @@ impl PjiApp {
         println!("⚠️  {}", style(message).yellow());
     }
 
-    fn copy_to_clipboard(text: &str) {
+    fn copy_to_clipboard(text: &str, context_message: &str) {
         Clipboard::new()
             .expect("can't find clipboard")
             .set_text(text)
             .expect("can't set clipboard");
 
         println!(
-            "📋 Copied \"{}\" to clipboard, just paste it in",
-            style(text).green()
+            "📋 Copied \"{}\" to clipboard. {}", // Changed
+            style(text).green(),
+            context_message
         )
     }
 
