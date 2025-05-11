@@ -25,6 +25,12 @@
 cargo install pji
 ```
 
+or use brew
+
+```sh
+brew install zhanba/tap/pji
+```
+
 ## Usage
 
 ### General Commands
