@@ -1,6 +1,6 @@
 [package]
 name = "pji"
-version = "0.1.6-rc.1"
+version = "0.1.6-rc.2"
 edition = "2021"
 authors = ["zhanba c5e1856@gmail.com"]
 description = "A CLI for managing, finding, and opening Git repositories."
