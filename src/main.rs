@@ -1,10 +1,10 @@
 use clap::{Args, Parser, Subcommand};
 use pji::app::PjiApp;
 
-/// pji provide a tree structure to manage your git projects.
+/// A CLI for managing, finding, and opening Git repositories.
 #[derive(Debug, Parser)]
 #[command(name = "pji")]
-#[command(version, about = "pji provide a tree structure to manage your git projects.", long_about = None)]
+#[command(version, about = "A CLI for managing, finding, and opening Git repositories.", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -12,30 +12,30 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// config root directory for your repos
+    /// Configure the root directory for your repositories
     Config,
-    /// add a git project
+    /// Add a git repository
     Add {
-        /// git project url
+        /// git repository url
         git: String,
     },
-    /// remove a git project
+    /// Remove a git repository
     Remove {
-        /// git project url
+        /// git repository url
         git: String,
     },
-    /// list all git projects
+    /// List all git repositories
     List {
         #[arg(short, long)]
         long: bool,
     },
-    /// fuzz search git projects
+    /// Fuzzy search for git repositories
     Find { query: Option<String> },
-    /// scan all git repo in root dir and save repo info
+    /// Scan all git repositories in the root directory and save their information
     Scan,
-    /// clean pji metadata and config
+    /// Clean pji metadata and configuration
     Clean,
-    /// open a git project home page in browser
+    /// Open a git repository page (e.g., home, PR, issue) in the browser
     Open(OpenArgs),
 }
 
@@ -51,14 +51,14 @@ struct OpenArgs {
 
 #[derive(Debug, Subcommand)]
 enum OpenCommands {
-    /// open a git project home page in browser
+    /// open a git repository home page in browser
     Home(OpenHomeArgs),
-    /// open a git project pull request page in browser
+    /// open a git repository pull request page in browser
     PR {
         /// pull request number
         number: Option<u32>,
     },
-    /// open a git project issue page in browser
+    /// open a git repository issue page in browser
     Issue {
         /// issue number
         number: Option<u32>,
@@ -67,7 +67,7 @@ enum OpenCommands {
 
 #[derive(Debug, Args)]
 struct OpenHomeArgs {
-    /// git project name. If it's empty pji will open project based on current directory
+    /// git repository name. If it's empty pji will open repository based on current directory
     url: Option<String>,
 }
 

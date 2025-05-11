@@ -1,4 +1,4 @@
-# pji - git repo manager
+# pji - A CLI for managing, finding, and opening Git repositories.
 
 ## Install
 
@@ -11,19 +11,19 @@ cargo install pji
 pji commands
 
 ```
-pji provide a tree structure to manage your git projects.
+A CLI for managing, finding, and opening Git repositories.
 
 Usage: pji [COMMAND]
 
 Commands:
-  config  config root directory for your repos
-  add     add a git project
-  remove  remove a git project
-  list    list all git projects
-  find    fuzz search git projects
-  scan    scan all git repo in root dir and save repo info
-  clean   clean pji metadata and config
-  open    open a git project home page in browser
+  config  Configure the root directory for your repositories
+  add     Add a git repository
+  remove  Remove a git repository
+  list    List all git repositories
+  find    Fuzzy search for git repositories
+  scan    Scan all git repositories in the root directory and save their information
+  clean   Clean pji metadata and configuration
+  open    Open a git repository page (e.g., home, PR, issue) in the browser
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -34,7 +34,7 @@ Options:
 pji open commands
 
 ```
-open a git project home page in browser
+Open a git repository page (e.g., home, PR, issue) in the browser
 
 Usage: pji open [URL]
        pji open home [URL]
