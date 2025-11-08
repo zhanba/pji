@@ -81,13 +81,81 @@ impl PjiMetadata {
 
     pub fn remove_repo(&mut self, pj_repo: &PjiRepo) -> &mut Self {
         self.repos
-            .retain(|repo| repo.git_uri.uri != pj_repo.git_uri.uri && repo.root == pj_repo.root);
+            .retain(|repo| {
+                !(repo.git_uri.hostname == pj_repo.git_uri.hostname
+                    && repo.git_uri.user == pj_repo.git_uri.user
+                    && repo.git_uri.repo == pj_repo.git_uri.repo
+                    && repo.root == pj_repo.root)
+            });
         self
     }
 
     pub fn has_repo(&self, pj_repo: &PjiRepo) -> bool {
         self.repos
             .iter()
-            .any(|repo| repo.git_uri.uri == pj_repo.git_uri.uri && repo.root == pj_repo.root)
+            .any(|repo| {
+                repo.git_uri.hostname == pj_repo.git_uri.hostname
+                    && repo.git_uri.user == pj_repo.git_uri.user
+                    && repo.git_uri.repo == pj_repo.git_uri.repo
+                    && repo.root == pj_repo.root
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repo::{GitProtocol, GitURI};
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_has_repo_handles_different_uri_formats() {
+        let mut metadata = PjiMetadata {
+            version: APP_METADATA_VERSION_V1.to_string(),
+            repos: vec![],
+        };
+
+        let root = PathBuf::from("/test/root");
+
+        // Create a repo with SSH URI
+        let ssh_repo = PjiRepo {
+            git_uri: GitURI {
+                hostname: "github.com".to_string(),
+                user: "testuser".to_string(),
+                repo: "testrepo".to_string(),
+                protocol: GitProtocol::SSH,
+                uri: "git@github.com:testuser/testrepo.git".to_string(),
+            },
+            dir: root.join("github.com/testuser/testrepo"),
+            root: root.clone(),
+            create_time: chrono::Utc::now(),
+            last_open_time: chrono::Utc::now(),
+        };
+
+        // Add the SSH repo to metadata
+        metadata.repos.push(ssh_repo.clone());
+
+        // Create an equivalent repo with HTTPS URI
+        let https_repo = PjiRepo {
+            git_uri: GitURI {
+                hostname: "github.com".to_string(),
+                user: "testuser".to_string(),
+                repo: "testrepo".to_string(),
+                protocol: GitProtocol::HTTP,
+                uri: "https://github.com/testuser/testrepo.git".to_string(),
+            },
+            dir: root.join("github.com/testuser/testrepo"),
+            root: root.clone(),
+            create_time: chrono::Utc::now(),
+            last_open_time: chrono::Utc::now(),
+        };
+
+        // Test that has_repo correctly identifies them as the same repository
+        assert!(metadata.has_repo(&ssh_repo), "Should find SSH repo");
+        assert!(metadata.has_repo(&https_repo), "Should find HTTPS repo as duplicate of SSH repo");
+
+        // Test remove_repo works correctly
+        metadata.remove_repo(&https_repo);
+        assert!(metadata.repos.is_empty(), "Remove should work regardless of URI format");
     }
 }
