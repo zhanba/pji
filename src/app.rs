@@ -255,9 +255,13 @@ impl PjiApp {
             Some(query) => self
                 .find_repo("Open repo: ", &query)
                 .expect("repo not found"),
-            None => self
-                .get_cwd_repo()
-                .expect("No repo found in current directory"),
+            None => match self.get_cwd_repo() {
+                Some(repo) => repo,
+                None => {
+                    Self::error_message("No repository found in current directory. Make sure you're in a directory managed by pji, or specify a repository name.");
+                    return;
+                }
+            },
         };
 
         let url = repo
@@ -267,9 +271,13 @@ impl PjiApp {
     }
 
     pub fn open_pr(&self, pr: Option<u32>) {
-        let repo = self
-            .get_cwd_repo()
-            .expect("No repo found in current directory");
+        let repo = match self.get_cwd_repo() {
+            Some(repo) => repo,
+            None => {
+                Self::error_message("No repository found in current directory. Make sure you're in a directory managed by pji.");
+                return;
+            }
+        };
 
         let url = repo
             .get_pr_url(pr)
@@ -278,9 +286,14 @@ impl PjiApp {
     }
 
     pub fn open_issue(&self, issue: Option<u32>) {
-        let repo = self
-            .get_cwd_repo()
-            .expect("No repo found in current directory");
+        let repo = match self.get_cwd_repo() {
+            Some(repo) => repo,
+            None => {
+                Self::error_message("No repository found in current directory. Make sure you're in a directory managed by pji.");
+                return;
+            }
+        };
+
         let url = repo
             .get_issue_url(issue)
             .expect(&format!("No issue found for {}", repo.git_uri.uri));
@@ -289,11 +302,18 @@ impl PjiApp {
 
     fn get_cwd_repo(&self) -> Option<&PjiRepo> {
         let cwd = env::current_dir().ok()?;
+        let cwd = cwd.canonicalize().ok()?;
         let repo = self
             .metadata
             .repos
             .iter()
-            .find(|repo| cwd.starts_with(&repo.dir));
+            .find(|repo| {
+                if let Ok(repo_dir_canonical) = repo.dir.canonicalize() {
+                    cwd.starts_with(repo_dir_canonical)
+                } else {
+                    false
+                }
+            });
         repo
     }
 
@@ -354,6 +374,10 @@ impl PjiApp {
 
     fn warn_message(message: &str) {
         println!("⚠️  {}", style(message).yellow());
+    }
+
+    fn error_message(message: &str) {
+        eprintln!("❌ {}", style(message).red());
     }
 
     fn copy_to_clipboard(text: &str, context_message: &str) {
