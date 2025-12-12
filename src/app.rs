@@ -172,6 +172,9 @@ impl PjiApp {
 
     pub fn scan(&mut self) {
         let mut total_new_repos_added = 0;
+        // Clean up duplicates before scanning
+        self.metadata.deduplicate();
+
         for root in self.config.roots.as_slice() {
             println!("🔍 Scanning {}...", root.display());
             if let Some(repos) = Self::get_repos_from_root(&root) {

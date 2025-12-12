@@ -80,14 +80,16 @@ impl PjiMetadata {
     }
 
     pub fn remove_repo(&mut self, pj_repo: &PjiRepo) -> &mut Self {
-        self.repos
-            .retain(|repo| repo.git_uri.uri != pj_repo.git_uri.uri && repo.root == pj_repo.root);
+        self.repos.retain(|repo| repo.dir != pj_repo.dir);
         self
     }
 
     pub fn has_repo(&self, pj_repo: &PjiRepo) -> bool {
-        self.repos
-            .iter()
-            .any(|repo| repo.git_uri.uri == pj_repo.git_uri.uri && repo.root == pj_repo.root)
+        self.repos.iter().any(|repo| repo.dir == pj_repo.dir)
+    }
+
+    pub fn deduplicate(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.repos.retain(|repo| seen.insert(repo.dir.clone()));
     }
 }
