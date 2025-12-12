@@ -324,11 +324,25 @@ impl PjiApp {
             .repos
             .sort_by(|a, b| b.last_open_time.cmp(&a.last_open_time));
 
+        let mut counts = std::collections::HashMap::new();
+        for repo in &self.metadata.repos {
+            let key = format!("{}/{}", repo.git_uri.user, repo.git_uri.repo);
+            *counts.entry(key).or_insert(0) += 1;
+        }
+
         let items = self
             .metadata
             .repos
-            .iter_mut()
-            .map(|repo| repo.dir.display().to_string())
+            .iter()
+            .map(|repo| {
+                let key = format!("{}/{}", repo.git_uri.user, repo.git_uri.repo);
+                // if there are multiple repos with the same user/repo, show the full path
+                if *counts.get(&key).unwrap_or(&0) > 1 {
+                    repo.dir.display().to_string()
+                } else {
+                    key
+                }
+            })
             .collect::<Vec<String>>();
 
         let selection = FuzzySelect::new()
@@ -341,11 +355,7 @@ impl PjiApp {
             .interact()
             .unwrap();
 
-        let repo_dir = &items[selection];
-        self.metadata
-            .repos
-            .iter_mut()
-            .find(|repo| repo.dir.display().to_string() == *repo_dir)
+        self.metadata.repos.get_mut(selection)
     }
 
     fn success_message(message: &str) {
