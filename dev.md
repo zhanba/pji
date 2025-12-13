@@ -4,5 +4,9 @@
 
 ## Publish
 
-cargo install --locked release-plz
+```sh
+brew upgrade cargo-dist
+
+dist init
+```
 

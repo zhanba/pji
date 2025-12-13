@@ -1,8 +1,9 @@
 [package]
 name = "pji"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 authors = ["zhanba c5e1856@gmail.com"]
+homepage = "https://github.com/zhanba/pji"
 description = "A CLI for managing, finding, and opening Git repositories."
 license = "MIT"
 repository = "https://github.com/zhanba/pji"
