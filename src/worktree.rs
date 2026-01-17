@@ -223,6 +223,7 @@ pub fn get_main_repo_from_worktree(worktree_dir: &PathBuf) -> Option<PathBuf> {
 /// * `branch` - Branch name to checkout (or create with -b)
 /// * `path` - Optional path for the worktree (defaults to {repo}.worktrees/{branch})
 /// * `create_branch` - If true, create a new branch
+/// * `base_branch` - Optional base branch for new branches (only used when create_branch is true)
 ///
 /// # Returns
 /// * `Ok(PathBuf)` - Path to the created worktree
@@ -232,6 +233,7 @@ pub fn add_worktree(
     branch: &str,
     path: Option<PathBuf>,
     create_branch: bool,
+    base_branch: Option<&str>,
 ) -> Result<PathBuf, String> {
     // Determine worktree path
     let worktree_path = match path {
@@ -266,7 +268,12 @@ pub fn add_worktree(
 
     cmd.arg(&worktree_path);
 
-    if !create_branch {
+    if create_branch {
+        // When creating a new branch, add the base branch (or use HEAD if not specified)
+        if let Some(base) = base_branch {
+            cmd.arg(base);
+        }
+    } else {
         cmd.arg(branch);
     }
 
@@ -278,6 +285,29 @@ pub fn add_worktree(
     }
 
     Ok(worktree_path)
+}
+
+/// Get the default worktree path for a given branch
+///
+/// # Arguments
+/// * `repo_dir` - Path to the repository
+/// * `branch` - Branch name
+///
+/// # Returns
+/// * `PathBuf` - Default worktree path
+pub fn get_default_worktree_path(repo_dir: &PathBuf, branch: &str) -> PathBuf {
+    let repo_name = repo_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo");
+    let worktrees_dir = repo_dir
+        .parent()
+        .map(|p| p.join(format!("{}.worktrees", repo_name)))
+        .unwrap_or_else(|| PathBuf::from(format!("{}.worktrees", repo_name)));
+
+    // Sanitize branch name for filesystem (replace / with -)
+    let safe_branch = branch.replace('/', "-");
+    worktrees_dir.join(&safe_branch)
 }
 
 /// Remove a worktree
@@ -307,6 +337,64 @@ pub fn remove_worktree(repo_dir: &PathBuf, worktree_path: &PathBuf, force: bool)
     }
 
     Ok(())
+}
+
+/// List local branches for a repository
+///
+/// # Arguments
+/// * `repo_dir` - Path to the repository
+///
+/// # Returns
+/// * `Vec<String>` - List of local branch names
+pub fn list_local_branches(repo_dir: &PathBuf) -> Vec<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_dir)
+        .arg("branch")
+        .arg("--list")
+        .arg("--format=%(refname:short)")
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(|line| line.to_string())
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// List remote branches for a repository
+///
+/// # Arguments
+/// * `repo_dir` - Path to the repository
+///
+/// # Returns
+/// * `Vec<String>` - List of remote branch names (e.g., "origin/main")
+pub fn list_remote_branches(repo_dir: &PathBuf) -> Vec<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_dir)
+        .arg("branch")
+        .arg("-r")
+        .arg("--format=%(refname:short)")
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout
+                .lines()
+                .filter(|line| !line.is_empty() && !line.contains("HEAD"))
+                .map(|line| line.to_string())
+                .collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Prune stale worktree information

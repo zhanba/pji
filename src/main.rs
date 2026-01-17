@@ -65,16 +65,8 @@ enum WorktreeCommands {
         /// Optional query to filter worktrees
         query: Option<String>,
     },
-    /// Create a new worktree
-    Add {
-        /// Branch name for the worktree
-        branch: String,
-        /// Create a new branch
-        #[arg(short = 'b', long)]
-        create_branch: bool,
-        /// Custom path for the worktree (defaults to {repo}.worktrees/{branch})
-        path: Option<String>,
-    },
+    /// Create a new worktree (interactive)
+    Add,
     /// Remove a worktree
     Remove {
         /// Path or name of the worktree to remove
@@ -166,12 +158,8 @@ fn main() {
                     WorktreeCommands::Switch { query } => {
                         PjiApp::new().worktree_switch(query);
                     }
-                    WorktreeCommands::Add {
-                        branch,
-                        create_branch,
-                        path,
-                    } => {
-                        PjiApp::new().worktree_add(&branch, create_branch, path);
+                    WorktreeCommands::Add => {
+                        PjiApp::new().worktree_add();
                     }
                     WorktreeCommands::Remove { worktree, force } => {
                         PjiApp::new().worktree_remove(worktree, force);

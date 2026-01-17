@@ -2,8 +2,9 @@ use crate::config::{PjiConfig, PjiMetadata};
 use crate::repo::PjiRepo;
 use crate::util::{list_dir, try_get_repo_from_dir};
 use crate::worktree::{
-    self, add_worktree, get_main_repo_from_worktree, is_linked_worktree, list_worktrees,
-    prune_worktrees, remove_worktree, GitWorktree,
+    self, add_worktree, get_default_worktree_path, get_main_repo_from_worktree, is_linked_worktree,
+    list_local_branches, list_remote_branches, list_worktrees, prune_worktrees, remove_worktree,
+    GitWorktree,
 };
 use arboard::Clipboard;
 use comfy_table::Table;
@@ -520,8 +521,8 @@ impl PjiApp {
         }
     }
 
-    /// Create a new worktree
-    pub fn worktree_add(&mut self, branch: &str, create_branch: bool, path: Option<String>) {
+    /// Create a new worktree with interactive flow
+    pub fn worktree_add(&mut self) {
         let repo_dir = self.get_worktree_repo_dir(None);
         let repo_dir = match repo_dir {
             Some(dir) => dir,
@@ -531,9 +532,30 @@ impl PjiApp {
             }
         };
 
-        let path = path.map(PathBuf::from);
+        // Interactive flow
+        let (final_branch, create_new, base_branch) =
+            match self.select_branch_for_worktree(&repo_dir) {
+                Some(result) => result,
+                None => return,
+            };
 
-        match add_worktree(&repo_dir, branch, path, create_branch) {
+        // Get default path and allow user to edit
+        let default_path = get_default_worktree_path(&repo_dir, &final_branch);
+        let worktree_path: String = Input::new()
+            .with_prompt("Worktree path")
+            .default(default_path.display().to_string())
+            .interact_text()
+            .unwrap();
+
+        let worktree_path = PathBuf::from(worktree_path);
+
+        match add_worktree(
+            &repo_dir,
+            &final_branch,
+            Some(worktree_path.clone()),
+            create_new,
+            base_branch.as_deref(),
+        ) {
             Ok(worktree_path) => {
                 Self::success_message(&format!(
                     "Worktree created at '{}'",
@@ -545,6 +567,129 @@ impl PjiApp {
                 eprintln!("Failed to create worktree: {}", e);
             }
         }
+    }
+
+    /// Interactive branch selection for worktree creation
+    /// Returns: (branch_name, create_new_branch, base_branch)
+    fn select_branch_for_worktree(
+        &self,
+        repo_dir: &PathBuf,
+    ) -> Option<(String, bool, Option<String>)> {
+        // Step 1: Select branch source
+        let source_options = vec!["Local branch", "Remote branch", "New branch"];
+        let source_selection = Select::new()
+            .with_prompt("Select branch source")
+            .default(0)
+            .items(&source_options)
+            .interact()
+            .ok()?;
+
+        match source_selection {
+            0 => {
+                // Local branch
+                let local_branches = list_local_branches(repo_dir);
+                if local_branches.is_empty() {
+                    Self::warn_message("No local branches found.");
+                    return None;
+                }
+
+                // Put main at the front
+                let local_branches = Self::prioritize_main_branch(local_branches, "main");
+
+                let selection = FuzzySelect::new()
+                    .with_prompt("Select local branch")
+                    .default(0)
+                    .highlight_matches(true)
+                    .max_length(10)
+                    .items(&local_branches)
+                    .interact()
+                    .ok()?;
+
+                Some((local_branches[selection].clone(), false, None))
+            }
+            1 => {
+                // Remote branch
+                let remote_branches = list_remote_branches(repo_dir);
+                if remote_branches.is_empty() {
+                    Self::warn_message("No remote branches found. Try running 'git fetch' first.");
+                    return None;
+                }
+
+                // Put origin/main at the front
+                let remote_branches = Self::prioritize_main_branch(remote_branches, "origin/main");
+
+                let selection = FuzzySelect::new()
+                    .with_prompt("Select remote branch")
+                    .default(0)
+                    .highlight_matches(true)
+                    .max_length(10)
+                    .items(&remote_branches)
+                    .interact()
+                    .ok()?;
+
+                Some((remote_branches[selection].clone(), false, None))
+            }
+            2 => {
+                // New branch
+                let new_branch_name: String = Input::new()
+                    .with_prompt("Enter new branch name")
+                    .interact_text()
+                    .ok()?;
+
+                if new_branch_name.is_empty() {
+                    Self::warn_message("Branch name cannot be empty.");
+                    return None;
+                }
+
+                // Get all branches for base selection
+                let local_branches = list_local_branches(repo_dir);
+                let remote_branches = list_remote_branches(repo_dir);
+
+                // Combine branches
+                let mut all_branches: Vec<String> = Vec::new();
+                all_branches.extend(remote_branches);
+                all_branches.extend(local_branches);
+
+                if all_branches.is_empty() {
+                    // No branches to base off, will use HEAD
+                    return Some((new_branch_name, true, None));
+                }
+
+                // Put origin/main or main at the front
+                let all_branches = Self::prioritize_main_branch(all_branches, "origin/main");
+
+                let selection = FuzzySelect::new()
+                    .with_prompt("Select base branch")
+                    .default(0)
+                    .highlight_matches(true)
+                    .max_length(10)
+                    .items(&all_branches)
+                    .interact()
+                    .ok()?;
+
+                Some((
+                    new_branch_name,
+                    true,
+                    Some(all_branches[selection].clone()),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    /// Move the preferred branch to the front of the list
+    fn prioritize_main_branch(mut branches: Vec<String>, preferred: &str) -> Vec<String> {
+        if let Some(idx) = branches.iter().position(|b| b == preferred) {
+            let branch = branches.remove(idx);
+            branches.insert(0, branch);
+        } else if preferred == "origin/main" {
+            // Fallback to main if origin/main not found
+            if let Some(idx) = branches.iter().position(|b| b == "main") {
+                let branch = branches.remove(idx);
+                branches.insert(0, branch);
+            }
+        }
+        branches
     }
 
     /// Remove a worktree
