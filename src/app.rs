@@ -7,6 +7,7 @@ use dialoguer::{console::style, Confirm, FuzzySelect, Input, Select};
 use std::env;
 use std::fs::{remove_dir_all, remove_file};
 use std::io;
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::{fs::create_dir_all, path::PathBuf};
 
@@ -162,12 +163,21 @@ impl PjiApp {
             .find_repo("🔍 Search and select repository: ", query)
             .expect("repo not found");
         repo.update_open_time();
-        let repo_dir = &repo.dir.display().to_string();
-        Self::success_message(&format!("Selected: {}", repo_dir));
-        Self::copy_to_clipboard(
-            &format!("cd {}", repo_dir),
-            "Paste to navigate to the repository.",
-        );
+        let repo_dir = repo.dir.clone();
+
+        // Get the user's shell from SHELL env var, default to /bin/sh
+        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+
+        // Save metadata before exec (exec replaces process, so we won't return)
+        self.metadata.save();
+
+        // Replace current process with a new shell in the target directory
+        let err = Command::new(&shell)
+            .current_dir(&repo_dir)
+            .exec();
+
+        // exec() only returns if there was an error
+        eprintln!("Failed to exec shell: {}", err);
     }
 
     pub fn scan(&mut self) {
