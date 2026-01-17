@@ -12,6 +12,7 @@ use dialoguer::{console::style, Confirm, FuzzySelect, Input, Select};
 use std::env;
 use std::fs::{create_dir_all, remove_dir_all, remove_file};
 use std::io;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -886,11 +887,27 @@ impl PjiApp {
     }
 
     /// Execute into a directory (replace current process with shell in that directory)
+    #[cfg(unix)]
     fn exec_into_dir(&self, dir: &PathBuf) {
         let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
         let err = Command::new(&shell).current_dir(dir).exec();
 
         eprintln!("Failed to exec shell: {}", err);
+    }
+
+    /// Execute into a directory (spawn shell in that directory on Windows)
+    #[cfg(windows)]
+    fn exec_into_dir(&self, dir: &PathBuf) {
+        let shell = env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+
+        match Command::new(&shell)
+            .current_dir(dir)
+            .spawn()
+            .and_then(|mut child| child.wait())
+        {
+            Ok(_) => {}
+            Err(e) => eprintln!("Failed to spawn shell: {}", e),
+        }
     }
 }
