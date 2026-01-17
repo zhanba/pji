@@ -1,15 +1,19 @@
 use crate::config::{PjiConfig, PjiMetadata};
 use crate::repo::PjiRepo;
 use crate::util::{list_dir, try_get_repo_from_dir};
+use crate::worktree::{
+    self, add_worktree, get_main_repo_from_worktree, is_linked_worktree, list_worktrees,
+    prune_worktrees, remove_worktree, GitWorktree,
+};
 use arboard::Clipboard;
 use comfy_table::Table;
 use dialoguer::{console::style, Confirm, FuzzySelect, Input, Select};
 use std::env;
-use std::fs::{remove_dir_all, remove_file};
+use std::fs::{create_dir_all, remove_dir_all, remove_file};
 use std::io;
 use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::{fs::create_dir_all, path::PathBuf};
 
 pub struct PjiApp {
     config: PjiConfig,
@@ -140,13 +144,18 @@ impl PjiApp {
             .sort_by(|a, b| b.last_open_time.cmp(&a.last_open_time));
         if long_format {
             let mut table = Table::new();
-            table.set_header(vec!["dir", "hostname", "user", "repo", "full uri"]);
+            table.set_header(vec!["dir", "hostname", "user", "repo", "worktrees", "full uri"]);
             self.metadata.repos.iter().for_each(|repo| {
+                let worktree_count = match list_worktrees(&repo.dir) {
+                    Some(wts) if wts.has_linked() => format!("{}", wts.count()),
+                    _ => "-".to_string(),
+                };
                 table.add_row(vec![
                     &repo.dir.display().to_string(),
                     &repo.git_uri.hostname,
                     &repo.git_uri.user,
                     &repo.git_uri.repo,
+                    &worktree_count,
                     &repo.git_uri.uri,
                 ]);
             });
@@ -165,19 +174,22 @@ impl PjiApp {
         repo.update_open_time();
         let repo_dir = repo.dir.clone();
 
-        // Get the user's shell from SHELL env var, default to /bin/sh
-        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-
         // Save metadata before exec (exec replaces process, so we won't return)
         self.metadata.save();
 
-        // Replace current process with a new shell in the target directory
-        let err = Command::new(&shell)
-            .current_dir(&repo_dir)
-            .exec();
+        // Check if the repository has worktrees
+        if let Some(worktrees) = list_worktrees(&repo_dir) {
+            if worktrees.has_linked() {
+                // Show worktree picker
+                if let Some(wt) = self.select_worktree(&worktrees, "") {
+                    self.exec_into_dir(&wt.path);
+                    return;
+                }
+            }
+        }
 
-        // exec() only returns if there was an error
-        eprintln!("Failed to exec shell: {}", err);
+        // No worktrees or only main worktree - exec into repo dir
+        self.exec_into_dir(&repo_dir);
     }
 
     pub fn scan(&mut self) {
@@ -238,6 +250,21 @@ impl PjiApp {
                     for user_dir in user_dirs {
                         if let Ok(repo_dirs) = list_dir(&user_dir) {
                             for repo_dir in repo_dirs {
+                                // Skip linked worktrees - they belong to their main repo
+                                if is_linked_worktree(&repo_dir) {
+                                    continue;
+                                }
+
+                                // Skip .worktrees directories
+                                if repo_dir
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .map(|n| n.ends_with(".worktrees"))
+                                    .unwrap_or(false)
+                                {
+                                    continue;
+                                }
+
                                 if let Some(repo_url) = try_get_repo_from_dir(&repo_dir) {
                                     let repo = PjiRepo::new(&repo_url, root);
                                     if repo.dir == repo_dir {
@@ -302,12 +329,31 @@ impl PjiApp {
 
     fn get_cwd_repo(&self) -> Option<&PjiRepo> {
         let cwd = env::current_dir().ok()?;
-        let repo = self
-            .metadata
+
+        // First check if we're in a linked worktree and resolve to main repo
+        let resolved_dir = if is_linked_worktree(&cwd) {
+            get_main_repo_from_worktree(&cwd)?
+        } else {
+            // Check if any parent is a linked worktree
+            let mut check_dir = cwd.clone();
+            let mut found_main = None;
+            loop {
+                if is_linked_worktree(&check_dir) {
+                    found_main = get_main_repo_from_worktree(&check_dir);
+                    break;
+                }
+                if !check_dir.pop() {
+                    break;
+                }
+            }
+            found_main.unwrap_or(cwd)
+        };
+
+        // Find the repo that matches the resolved directory
+        self.metadata
             .repos
             .iter()
-            .find(|repo| cwd.starts_with(&repo.dir));
-        repo
+            .find(|repo| resolved_dir.starts_with(&repo.dir))
     }
 
     fn open_url(url: &str) {
@@ -398,5 +444,308 @@ impl PjiApp {
             .interact()
             .unwrap();
         confirmation
+    }
+
+    // ==================== Worktree Commands ====================
+
+    /// List worktrees for current or selected repository
+    pub fn worktree_list(&mut self, query: Option<String>) {
+        let repo_dir = self.get_worktree_repo_dir(query);
+        let repo_dir = match repo_dir {
+            Some(dir) => dir,
+            None => {
+                Self::warn_message("No repository found.");
+                return;
+            }
+        };
+
+        match list_worktrees(&repo_dir) {
+            Some(worktrees) => {
+                let mut table = Table::new();
+                table.set_header(vec!["Path", "Branch", "Status"]);
+
+                for wt in worktrees.all() {
+                    let status = if wt.is_main {
+                        "main".to_string()
+                    } else if wt.locked {
+                        "locked".to_string()
+                    } else if wt.prunable {
+                        "prunable".to_string()
+                    } else {
+                        "".to_string()
+                    };
+
+                    table.add_row(vec![
+                        wt.path.display().to_string(),
+                        wt.branch.clone().unwrap_or_else(|| format!("({})", &wt.commit[..8.min(wt.commit.len())])),
+                        status,
+                    ]);
+                }
+
+                println!("{table}");
+                println!("\nTotal: {} worktree(s)", worktrees.count());
+            }
+            None => {
+                println!("No worktrees found for this repository.");
+            }
+        }
+    }
+
+    /// Fuzzy select and switch to a worktree
+    pub fn worktree_switch(&mut self, query: Option<String>) {
+        let repo_dir = self.get_worktree_repo_dir(None);
+        let repo_dir = match repo_dir {
+            Some(dir) => dir,
+            None => {
+                Self::warn_message("No repository found in current directory.");
+                return;
+            }
+        };
+
+        let worktrees = match list_worktrees(&repo_dir) {
+            Some(wts) if wts.count() > 1 => wts,
+            Some(_) => {
+                Self::warn_message("Only one worktree exists. Nothing to switch to.");
+                return;
+            }
+            None => {
+                Self::warn_message("No worktrees found for this repository.");
+                return;
+            }
+        };
+
+        let selected = self.select_worktree(&worktrees, query.as_deref().unwrap_or(""));
+        if let Some(wt) = selected {
+            self.exec_into_dir(&wt.path);
+        }
+    }
+
+    /// Create a new worktree
+    pub fn worktree_add(&mut self, branch: &str, create_branch: bool, path: Option<String>) {
+        let repo_dir = self.get_worktree_repo_dir(None);
+        let repo_dir = match repo_dir {
+            Some(dir) => dir,
+            None => {
+                Self::warn_message("No repository found in current directory.");
+                return;
+            }
+        };
+
+        let path = path.map(PathBuf::from);
+
+        match add_worktree(&repo_dir, branch, path, create_branch) {
+            Ok(worktree_path) => {
+                Self::success_message(&format!(
+                    "Worktree created at '{}'",
+                    worktree_path.display()
+                ));
+                self.exec_into_dir(&worktree_path);
+            }
+            Err(e) => {
+                eprintln!("Failed to create worktree: {}", e);
+            }
+        }
+    }
+
+    /// Remove a worktree
+    pub fn worktree_remove(&mut self, worktree: Option<String>, force: bool) {
+        let repo_dir = self.get_worktree_repo_dir(None);
+        let repo_dir = match repo_dir {
+            Some(dir) => dir,
+            None => {
+                Self::warn_message("No repository found in current directory.");
+                return;
+            }
+        };
+
+        let worktrees = match list_worktrees(&repo_dir) {
+            Some(wts) if !wts.linked.is_empty() => wts,
+            Some(_) => {
+                Self::warn_message("No linked worktrees to remove.");
+                return;
+            }
+            None => {
+                Self::warn_message("No worktrees found for this repository.");
+                return;
+            }
+        };
+
+        // Determine which worktree to remove
+        let worktree_path = match worktree {
+            Some(wt_str) => {
+                // Try to find worktree by path or branch name
+                let found = worktrees.linked.iter().find(|wt| {
+                    wt.path.to_string_lossy().contains(&wt_str)
+                        || wt.branch.as_deref() == Some(&wt_str)
+                });
+                match found {
+                    Some(wt) => wt.path.clone(),
+                    None => {
+                        Self::warn_message(&format!("Worktree '{}' not found.", wt_str));
+                        return;
+                    }
+                }
+            }
+            None => {
+                // Interactive selection from linked worktrees only
+                let items: Vec<String> = worktrees
+                    .linked
+                    .iter()
+                    .map(|wt| {
+                        format!(
+                            "{} ({})",
+                            wt.branch.as_deref().unwrap_or("detached"),
+                            wt.path.display()
+                        )
+                    })
+                    .collect();
+
+                let selection = FuzzySelect::new()
+                    .with_prompt("Select worktree to remove")
+                    .default(0)
+                    .highlight_matches(true)
+                    .items(&items)
+                    .interact()
+                    .unwrap();
+
+                worktrees.linked[selection].path.clone()
+            }
+        };
+
+        // Confirm removal
+        if !Self::confirm(&format!(
+            "Remove worktree at '{}'?",
+            worktree_path.display()
+        )) {
+            println!("Removal cancelled.");
+            return;
+        }
+
+        match remove_worktree(&repo_dir, &worktree_path, force) {
+            Ok(()) => {
+                Self::success_message(&format!(
+                    "Worktree '{}' removed successfully.",
+                    worktree_path.display()
+                ));
+            }
+            Err(e) => {
+                eprintln!("Failed to remove worktree: {}", e);
+                if !force {
+                    println!("Tip: Use --force to force removal of dirty worktrees.");
+                }
+            }
+        }
+    }
+
+    /// Clean up stale worktree information
+    pub fn worktree_prune(&self) {
+        let repo_dir = self.get_cwd_repo_dir();
+        let repo_dir = match repo_dir {
+            Some(dir) => dir,
+            None => {
+                Self::warn_message("No repository found in current directory.");
+                return;
+            }
+        };
+
+        match prune_worktrees(&repo_dir) {
+            Ok(output) => {
+                if output.is_empty() {
+                    println!("No stale worktree entries to prune.");
+                } else {
+                    println!("{}", output);
+                    Self::success_message("Worktree pruning complete.");
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to prune worktrees: {}", e);
+            }
+        }
+    }
+
+    /// Get the repository directory for worktree operations
+    /// If in a worktree, returns the main repo directory
+    fn get_worktree_repo_dir(&mut self, query: Option<String>) -> Option<PathBuf> {
+        match query {
+            Some(q) => {
+                let repo = self.find_repo("Select repository: ", &q)?;
+                Some(repo.dir.clone())
+            }
+            None => self.get_cwd_repo_dir(),
+        }
+    }
+
+    /// Get the current working directory's repository directory
+    /// Handles both main repos and linked worktrees
+    fn get_cwd_repo_dir(&self) -> Option<PathBuf> {
+        let cwd = env::current_dir().ok()?;
+
+        // First check if we're in a linked worktree
+        if is_linked_worktree(&cwd) {
+            return get_main_repo_from_worktree(&cwd);
+        }
+
+        // Check if cwd or any parent is a linked worktree
+        let mut check_dir = cwd.clone();
+        loop {
+            if is_linked_worktree(&check_dir) {
+                return get_main_repo_from_worktree(&check_dir);
+            }
+            if check_dir.join(".git").is_dir() {
+                return Some(check_dir);
+            }
+            if !check_dir.pop() {
+                break;
+            }
+        }
+
+        // Fall back to checking metadata repos
+        self.metadata
+            .repos
+            .iter()
+            .find(|repo| cwd.starts_with(&repo.dir))
+            .map(|repo| repo.dir.clone())
+    }
+
+    /// Select a worktree from the list using fuzzy selection
+    fn select_worktree<'a>(
+        &self,
+        worktrees: &'a worktree::WorktreeList,
+        query: &str,
+    ) -> Option<&'a GitWorktree> {
+        let all_worktrees = worktrees.all();
+        let items: Vec<String> = all_worktrees
+            .iter()
+            .map(|wt| {
+                let status = if wt.is_main { " (main)" } else { "" };
+                format!(
+                    "{}{}  {}",
+                    wt.branch.as_deref().unwrap_or("detached"),
+                    status,
+                    wt.path.display()
+                )
+            })
+            .collect();
+
+        let selection = FuzzySelect::new()
+            .with_prompt("Select worktree")
+            .with_initial_text(query)
+            .default(0)
+            .highlight_matches(true)
+            .max_length(10)
+            .items(&items)
+            .interact()
+            .unwrap();
+
+        all_worktrees.get(selection).copied()
+    }
+
+    /// Execute into a directory (replace current process with shell in that directory)
+    fn exec_into_dir(&self, dir: &PathBuf) {
+        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+
+        let err = Command::new(&shell).current_dir(dir).exec();
+
+        eprintln!("Failed to exec shell: {}", err);
     }
 }
