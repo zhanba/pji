@@ -8,6 +8,9 @@ use pji::app::PjiApp;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Optional query for fuzzy search (shorthand for 'pji find <query>')
+    query: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -111,8 +114,8 @@ fn main() {
             }
         },
         None => {
-            // Handle the default case
-            println!("No command provided");
+            // Default to find command when no subcommand is provided
+            PjiApp::new().find(cli.query.as_deref().unwrap_or(""));
         }
     }
 }
