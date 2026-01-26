@@ -146,7 +146,14 @@ impl PjiApp {
             .sort_by(|a, b| b.last_open_time.cmp(&a.last_open_time));
         if long_format {
             let mut table = Table::new();
-            table.set_header(vec!["dir", "hostname", "user", "repo", "worktrees", "full uri"]);
+            table.set_header(vec![
+                "dir",
+                "hostname",
+                "user",
+                "repo",
+                "worktrees",
+                "full uri",
+            ]);
             self.metadata.repos.iter().for_each(|repo| {
                 let worktree_count = match list_worktrees(&repo.dir) {
                     Some(wts) if wts.has_linked() => format!("{}", wts.count()),
@@ -171,7 +178,7 @@ impl PjiApp {
 
     pub fn find(&mut self, query: &str) {
         let repo = self
-            .find_repo("🔍 Search and select repository: ", query)
+            .find_repo("🔍 Search and select repository", query)
             .expect("repo not found");
         repo.update_open_time();
         let repo_dir = repo.dir.clone();
@@ -479,7 +486,9 @@ impl PjiApp {
 
                     table.add_row(vec![
                         wt.path.display().to_string(),
-                        wt.branch.clone().unwrap_or_else(|| format!("({})", &wt.commit[..8.min(wt.commit.len())])),
+                        wt.branch.clone().unwrap_or_else(|| {
+                            format!("({})", &wt.commit[..8.min(wt.commit.len())])
+                        }),
                         status,
                     ]);
                 }
@@ -628,7 +637,7 @@ impl PjiApp {
                     .interact()
                     .ok()?;
 
-                Some((remote_branches[selection].clone(), false, None))
+                Some((remote_branches[selection].clone(), true, None))
             }
             2 => {
                 // New branch
@@ -668,11 +677,7 @@ impl PjiApp {
                     .interact()
                     .ok()?;
 
-                Some((
-                    new_branch_name,
-                    true,
-                    Some(all_branches[selection].clone()),
-                ))
+                Some((new_branch_name, true, Some(all_branches[selection].clone())))
             }
             _ => None,
         }
