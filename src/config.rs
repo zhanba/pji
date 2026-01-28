@@ -89,7 +89,82 @@ impl PjiMetadata {
     }
 
     pub fn deduplicate(&mut self) {
-        let mut seen = std::collections::HashSet::new();
-        self.repos.retain(|repo| seen.insert(repo.dir.clone()));
+        if self.repos.is_empty() {
+            return;
+        }
+
+        let mut indices: Vec<(usize, &PathBuf)> = self
+            .repos
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (i, &r.dir))
+            .collect();
+        indices.sort_by(|a, b| a.1.cmp(b.1));
+
+        let mut to_remove = vec![false; self.repos.len()];
+        for i in 0..indices.len().saturating_sub(1) {
+            if indices[i].1 == indices[i + 1].1 {
+                to_remove[indices[i + 1].0] = true;
+            }
+        }
+
+        let mut current_idx = 0;
+        self.repos.retain(|_| {
+            let keep = !to_remove[current_idx];
+            current_idx += 1;
+            keep
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repo::PjiRepo;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_deduplicate() {
+        let root = PathBuf::from("/tmp");
+        let repo1 = PjiRepo::new("https://github.com/user/repo1.git", &root);
+        let repo2 = PjiRepo::new("https://github.com/user/repo2.git", &root);
+        let repo1_dup = PjiRepo::new("https://github.com/user/repo1.git", &root);
+
+        let mut metadata = PjiMetadata::default();
+        metadata.add_repo(&repo1);
+        metadata.add_repo(&repo2);
+        metadata.add_repo(&repo1_dup);
+
+        assert_eq!(metadata.repos.len(), 3);
+
+        metadata.deduplicate();
+
+        assert_eq!(metadata.repos.len(), 2);
+        assert_eq!(metadata.repos[0].dir, repo1.dir);
+        assert_eq!(metadata.repos[1].dir, repo2.dir);
+    }
+
+    #[test]
+    fn test_deduplicate_order() {
+        let root = PathBuf::from("/tmp");
+        let repo1 = PjiRepo::new("https://github.com/user/repo1.git", &root);
+        let repo2 = PjiRepo::new("https://github.com/user/repo2.git", &root);
+        let repo3 = PjiRepo::new("https://github.com/user/repo3.git", &root);
+
+        let mut metadata = PjiMetadata::default();
+        // Order: 2, 1, 3, 2, 1
+        metadata.add_repo(&repo2);
+        metadata.add_repo(&repo1);
+        metadata.add_repo(&repo3);
+        metadata.add_repo(&repo2);
+        metadata.add_repo(&repo1);
+
+        metadata.deduplicate();
+
+        // Expected order: 2, 1, 3
+        assert_eq!(metadata.repos.len(), 3);
+        assert_eq!(metadata.repos[0].dir, repo2.dir);
+        assert_eq!(metadata.repos[1].dir, repo1.dir);
+        assert_eq!(metadata.repos[2].dir, repo3.dir);
     }
 }
