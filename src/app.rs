@@ -274,6 +274,11 @@ impl PjiApp {
                                     continue;
                                 }
 
+                                // Avoid spawning git process if it's not a git repository
+                                if !repo_dir.join(".git").exists() {
+                                    continue;
+                                }
+
                                 if let Some(repo_url) = try_get_repo_from_dir(&repo_dir) {
                                     let repo = PjiRepo::new(&repo_url, root);
                                     if repo.dir == repo_dir {
