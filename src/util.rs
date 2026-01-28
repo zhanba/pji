@@ -1,13 +1,20 @@
-use std::{fs::read_dir, io, path::PathBuf, process::Command};
+use std::{fs::read_dir, io, path::PathBuf, process::Command, sync::OnceLock};
 
 use crate::repo::{GitProtocol, GitURI};
 use regex::Regex;
 
+static SSH_RE: OnceLock<Regex> = OnceLock::new();
+static HTTP_RE: OnceLock<Regex> = OnceLock::new();
+
 pub fn parse_git_url(url: &str) -> Option<GitURI> {
-    let ssh_re = Regex::new(r"^git@(?P<host>[^:]+):(?P<user>[^/]+)/(?P<repo>[^/]+)\.git$")
-        .expect("Failed to compile SSH regex");
-    let http_re = Regex::new(r"^https?://(?P<host>[^/]+)/(?P<user>[^/]+)/(?P<repo>[^/]+)\.git$")
-        .expect("Failed to compile HTTP regex");
+    let ssh_re = SSH_RE.get_or_init(|| {
+        Regex::new(r"^git@(?P<host>[^:]+):(?P<user>[^/]+)/(?P<repo>[^/]+)\.git$")
+            .expect("Failed to compile SSH regex")
+    });
+    let http_re = HTTP_RE.get_or_init(|| {
+        Regex::new(r"^https?://(?P<host>[^/]+)/(?P<user>[^/]+)/(?P<repo>[^/]+)\.git$")
+            .expect("Failed to compile HTTP regex")
+    });
 
     if let Some(caps) = ssh_re.captures(url) {
         let hostname = caps.name("host").map(|m| m.as_str()).unwrap_or("");
@@ -74,4 +81,43 @@ pub fn list_dir(dir: &PathBuf) -> io::Result<Vec<PathBuf>> {
         }
     }
     Ok(dirs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ssh_url() {
+        let url = "git@github.com:user/repo.git";
+        let uri = parse_git_url(url).expect("Should parse SSH URL");
+        assert_eq!(uri.hostname, "github.com");
+        assert_eq!(uri.user, "user");
+        assert_eq!(uri.repo, "repo");
+        assert_eq!(uri.uri, url);
+        match uri.protocol {
+            GitProtocol::SSH => (),
+            _ => panic!("Expected SSH protocol"),
+        }
+    }
+
+    #[test]
+    fn test_parse_http_url() {
+        let url = "https://github.com/user/repo.git";
+        let uri = parse_git_url(url).expect("Should parse HTTP URL");
+        assert_eq!(uri.hostname, "github.com");
+        assert_eq!(uri.user, "user");
+        assert_eq!(uri.repo, "repo");
+        assert_eq!(uri.uri, url);
+        match uri.protocol {
+            GitProtocol::HTTP => (),
+            _ => panic!("Expected HTTP protocol"),
+        }
+    }
+
+    #[test]
+    fn test_parse_invalid_url() {
+        assert!(parse_git_url("invalid").is_none());
+        assert!(parse_git_url("https://github.com/user/repo").is_none()); // Missing .git
+    }
 }
