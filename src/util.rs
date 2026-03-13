@@ -1,7 +1,17 @@
+use is_terminal::IsTerminal;
 use std::{fs::read_dir, io, path::PathBuf, process::Command};
 
 use crate::repo::{GitProtocol, GitURI};
 use regex::Regex;
+
+/// Returns true when stdin/stdout are both connected to a real TTY.
+/// Pass `force_non_interactive = true` to override (e.g. from --no-interactive flag).
+pub fn is_interactive_mode(force_non_interactive: bool) -> bool {
+    if force_non_interactive {
+        return false;
+    }
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
 
 pub fn parse_git_url(url: &str) -> Option<GitURI> {
     let ssh_re = Regex::new(r"^git@(?P<host>[^:]+):(?P<user>[^/]+)/(?P<repo>[^/]+)\.git$")

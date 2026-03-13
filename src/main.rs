@@ -1,5 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use pji::app::PjiApp;
+use pji::util::is_interactive_mode;
 
 /// A CLI for managing, finding, and opening Git repositories.
 #[derive(Debug, Parser)]
@@ -11,12 +12,24 @@ struct Cli {
 
     /// Optional query for fuzzy search (shorthand for 'pji find <query>')
     query: Option<String>,
+
+    /// Disable interactive TUI prompts (auto-detected when not a TTY)
+    #[arg(short = 'n', long = "no-interactive", global = true)]
+    no_interactive: bool,
+
+    /// Auto-confirm destructive prompts (useful in scripts)
+    #[arg(short = 'y', long = "yes", global = true)]
+    yes: bool,
 }
 
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Configure the root directory for your repositories
-    Config,
+    Config {
+        /// Root path to add non-interactively (skips the interactive prompt)
+        #[arg(long)]
+        root: Option<String>,
+    },
     /// Add a git repository
     Add {
         /// git repository url
@@ -65,8 +78,21 @@ enum WorktreeCommands {
         /// Optional query to filter worktrees
         query: Option<String>,
     },
-    /// Create a new worktree (interactive)
-    Add,
+    /// Create a new worktree
+    Add {
+        /// Branch name to create or checkout (required in non-interactive mode)
+        #[arg(short, long)]
+        branch: Option<String>,
+        /// Create a new branch (use with --branch)
+        #[arg(long)]
+        new_branch: bool,
+        /// Base branch for the new branch (use with --new-branch)
+        #[arg(long)]
+        base: Option<String>,
+        /// Path for the new worktree (defaults to <repo>/../<repo>.worktrees/<branch>)
+        #[arg(long)]
+        path: Option<String>,
+    },
     /// Remove a worktree
     Remove {
         /// Path or name of the worktree to remove
@@ -114,65 +140,76 @@ struct OpenHomeArgs {
 fn main() {
     let cli = Cli::parse();
 
+    let interactive = is_interactive_mode(cli.no_interactive);
+    let auto_yes = cli.yes;
+
     match cli.command {
         Some(command) => match command {
-            Commands::Config => {
-                PjiApp::new().start_config();
+            Commands::Config { root } => {
+                PjiApp::new(interactive, auto_yes).start_config(root.as_deref());
             }
             Commands::Add { git } => {
-                PjiApp::new().add(git.as_str());
+                PjiApp::new(interactive, auto_yes).add(git.as_str());
             }
             Commands::Remove { git } => {
-                PjiApp::new().remove(git.as_str());
+                PjiApp::new(interactive, auto_yes).remove(git.as_str());
             }
             Commands::List { long } => {
-                PjiApp::new().list(long);
+                PjiApp::new(interactive, auto_yes).list(long);
             }
             Commands::Find { query } => {
-                PjiApp::new().find(query.as_deref().unwrap_or(""));
+                PjiApp::new(interactive, auto_yes).find(query.as_deref().unwrap_or(""));
             }
             Commands::Scan => {
-                PjiApp::new().scan();
+                PjiApp::new(interactive, auto_yes).scan();
             }
             Commands::Clean => PjiApp::clean(),
             Commands::Open(args) => {
                 let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
                 match open_cmd {
                     OpenCommands::Home(home) => {
-                        PjiApp::new().open_home(home.url);
+                        PjiApp::new(interactive, auto_yes).open_home(home.url);
                     }
                     OpenCommands::PR { number } => {
-                        PjiApp::new().open_pr(number);
+                        PjiApp::new(interactive, auto_yes).open_pr(number);
                     }
                     OpenCommands::Issue { number } => {
-                        PjiApp::new().open_issue(number);
+                        PjiApp::new(interactive, auto_yes).open_issue(number);
                     }
                 }
             }
             Commands::Worktree(args) => {
-                let wt_cmd = args.command.unwrap_or(WorktreeCommands::Switch { query: None });
+                let wt_cmd = args
+                    .command
+                    .unwrap_or(WorktreeCommands::Switch { query: None });
                 match wt_cmd {
                     WorktreeCommands::List { query } => {
-                        PjiApp::new().worktree_list(query);
+                        PjiApp::new(interactive, auto_yes).worktree_list(query);
                     }
                     WorktreeCommands::Switch { query } => {
-                        PjiApp::new().worktree_switch(query);
+                        PjiApp::new(interactive, auto_yes).worktree_switch(query);
                     }
-                    WorktreeCommands::Add => {
-                        PjiApp::new().worktree_add();
+                    WorktreeCommands::Add {
+                        branch,
+                        new_branch,
+                        base,
+                        path,
+                    } => {
+                        PjiApp::new(interactive, auto_yes)
+                            .worktree_add(branch, new_branch, base, path);
                     }
                     WorktreeCommands::Remove { worktree, force } => {
-                        PjiApp::new().worktree_remove(worktree, force);
+                        PjiApp::new(interactive, auto_yes).worktree_remove(worktree, force);
                     }
                     WorktreeCommands::Prune => {
-                        PjiApp::new().worktree_prune();
+                        PjiApp::new(interactive, auto_yes).worktree_prune();
                     }
                 }
             }
         },
         None => {
             // Default to find command when no subcommand is provided
-            PjiApp::new().find(cli.query.as_deref().unwrap_or(""));
+            PjiApp::new(interactive, auto_yes).find(cli.query.as_deref().unwrap_or(""));
         }
     }
 }

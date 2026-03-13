@@ -20,20 +20,58 @@ use std::process::{Command, Stdio};
 pub struct PjiApp {
     config: PjiConfig,
     metadata: PjiMetadata,
+    /// Whether the session is in interactive (TUI) mode.
+    interactive: bool,
+    /// Whether to auto-confirm destructive prompts (`--yes`).
+    auto_yes: bool,
 }
 
 impl PjiApp {
-    pub fn new() -> Self {
+    pub fn new(interactive: bool, auto_yes: bool) -> Self {
         let config = PjiConfig::load();
         let metadata = PjiMetadata::load();
-        Self { config, metadata }
+        Self {
+            config,
+            metadata,
+            interactive,
+            auto_yes,
+        }
     }
 
-    pub fn start_config(&mut self) {
-        self.add_root();
+    // ==================== Config ====================
+
+    /// Configure the root directory.
+    /// In non-interactive mode, pass `root` directly to skip prompts.
+    pub fn start_config(&mut self, root: Option<&str>) {
+        if let Some(r) = root {
+            self.add_root_non_interactive(r);
+        } else if self.interactive {
+            self.add_root_interactive();
+        } else {
+            eprintln!(
+                "error: non-interactive mode requires --root <path>. \
+                 Example: pji config --root ~/projects"
+            );
+            std::process::exit(1);
+        }
     }
 
-    fn add_root(&mut self) -> &PathBuf {
+    fn add_root_non_interactive(&mut self, root_str: &str) {
+        let path = PathBuf::from(root_str);
+        if self.config.roots.contains(&path) {
+            Self::warn_message(&format!("Root '{}' already exists.", root_str));
+            return;
+        }
+        if !path.exists() {
+            create_dir_all(&path).expect("should create dir success");
+            Self::success_message(&format!("Directory '{}' created.", path.display()));
+        }
+        self.config.roots.push(path.clone());
+        self.config.save().expect("should save config file success");
+        Self::success_message(&format!("Root '{}' added successfully.", path.display()));
+    }
+
+    fn add_root_interactive(&mut self) -> &PathBuf {
         let name: String = Input::new()
             .with_prompt("Enter the full path for the new pji root directory")
             .default(PjiConfig::get_default_root().display().to_string())
@@ -46,7 +84,7 @@ impl PjiApp {
                 "Root '{}' already exists. Please choose another.",
                 name
             ));
-            self.add_root()
+            self.add_root_interactive()
         } else {
             if !path.exists() {
                 println!("Creating directory '{}'...", path.display());
@@ -66,11 +104,16 @@ impl PjiApp {
     fn get_working_root(&mut self) -> &PathBuf {
         let len = self.config.roots.len();
         if len == 0 {
-            Self::warn_message("No pji roots found. Let's add one first.");
-            self.add_root()
+            if self.interactive {
+                Self::warn_message("No pji roots found. Let's add one first.");
+                self.add_root_interactive()
+            } else {
+                eprintln!("error: no pji roots configured. Run 'pji config --root <path>' first.");
+                std::process::exit(1);
+            }
         } else if len == 1 {
             &self.config.roots[0]
-        } else {
+        } else if self.interactive {
             let items = self
                 .config
                 .roots
@@ -84,8 +127,13 @@ impl PjiApp {
                 .interact()
                 .unwrap();
             &self.config.roots[selection]
+        } else {
+            // Non-interactive: use the first root
+            &self.config.roots[0]
         }
     }
+
+    // ==================== Add / Remove / List / Scan / Clean ====================
 
     pub fn add(&mut self, repo_uri_str: &str) {
         let root = self.get_working_root();
@@ -106,10 +154,12 @@ impl PjiApp {
             "✨ Repository '{}' added to '{}'.",
             &repo.git_uri.uri, &repo_dir
         ));
-        Self::copy_to_clipboard(
-            &format!("cd {}", repo_dir),
-            "Paste to navigate to the repository.",
-        );
+        if self.interactive {
+            Self::copy_to_clipboard(
+                &format!("cd {}", repo_dir),
+                "Paste to navigate to the repository.",
+            );
+        }
     }
 
     pub fn remove(&mut self, repo_uri_str: &str) {
@@ -122,11 +172,10 @@ impl PjiApp {
             ));
             return;
         }
-        let confirmation = Self::confirm(&format!(
+        if !self.confirm(&format!(
             "Are you sure you want to remove the repository '{}' from disk and pji?",
             repo.git_uri.uri
-        ));
-        if !confirmation {
+        )) {
             println!("✖️ Removal cancelled.");
             return;
         }
@@ -176,6 +225,8 @@ impl PjiApp {
         }
     }
 
+    // ==================== Find ====================
+
     pub fn find(&mut self, query: &str) {
         let repo = self
             .find_repo("🔍 Search and select repository", query)
@@ -189,10 +240,14 @@ impl PjiApp {
         // Check if the repository has worktrees
         if let Some(worktrees) = list_worktrees(&repo_dir) {
             if worktrees.has_linked() {
-                // Show worktree picker
-                if let Some(wt) = self.select_worktree(&worktrees, "") {
-                    self.exec_into_dir(&wt.path);
-                    return;
+                if self.interactive {
+                    // Show worktree picker
+                    if let Some(wt) = self.select_worktree(&worktrees, "") {
+                        self.exec_into_dir(&wt.path);
+                        return;
+                    }
+                } else {
+                    // Non-interactive: go to main repo dir (worktree selection not possible)
                 }
             }
         }
@@ -200,6 +255,8 @@ impl PjiApp {
         // No worktrees or only main worktree - exec into repo dir
         self.exec_into_dir(&repo_dir);
     }
+
+    // ==================== Scan / Clean ====================
 
     pub fn scan(&mut self) {
         let mut total_new_repos_added = 0;
@@ -299,6 +356,8 @@ impl PjiApp {
         Some(repos)
     }
 
+    // ==================== Open ====================
+
     pub fn open_home(&mut self, query: Option<String>) {
         let repo = match query {
             Some(query) => self
@@ -387,43 +446,94 @@ impl PjiApp {
         Ok(())
     }
 
+    // ==================== Core selection helpers ====================
+
+    /// Find a repository by fuzzy-selection (interactive) or exact/prefix match (non-interactive).
+    ///
+    /// Non-interactive rules:
+    ///   - Exactly one match → return it.
+    ///   - Zero matches      → print error to stderr, exit 1.
+    ///   - Multiple matches  → print list to stderr, exit 1.
     fn find_repo(&mut self, prompt: &str, query: &str) -> Option<&mut PjiRepo> {
         self.metadata
             .repos
             .sort_by(|a, b| b.last_open_time.cmp(&a.last_open_time));
 
-        let mut counts = std::collections::HashMap::new();
-        for repo in &self.metadata.repos {
-            let key = format!("{}/{}", repo.git_uri.user, repo.git_uri.repo);
-            *counts.entry(key).or_insert(0) += 1;
-        }
-
-        let items = self
-            .metadata
-            .repos
-            .iter()
-            .map(|repo| {
+        if self.interactive {
+            let mut counts = std::collections::HashMap::new();
+            for repo in &self.metadata.repos {
                 let key = format!("{}/{}", repo.git_uri.user, repo.git_uri.repo);
-                // if there are multiple repos with the same user/repo, show the full path
-                if *counts.get(&key).unwrap_or(&0) > 1 {
-                    repo.dir.display().to_string()
-                } else {
-                    key
+                *counts.entry(key).or_insert(0) += 1;
+            }
+
+            let items = self
+                .metadata
+                .repos
+                .iter()
+                .map(|repo| {
+                    let key = format!("{}/{}", repo.git_uri.user, repo.git_uri.repo);
+                    // if there are multiple repos with the same user/repo, show the full path
+                    if *counts.get(&key).unwrap_or(&0) > 1 {
+                        repo.dir.display().to_string()
+                    } else {
+                        key
+                    }
+                })
+                .collect::<Vec<String>>();
+
+            let selection = FuzzySelect::new()
+                .with_prompt(prompt)
+                .with_initial_text(query)
+                .default(0)
+                .highlight_matches(true)
+                .max_length(10)
+                .items(&items)
+                .interact()
+                .unwrap();
+
+            self.metadata.repos.get_mut(selection)
+        } else {
+            // Non-interactive: filter by query string
+            let q = query.to_lowercase();
+            let matches: Vec<usize> = self
+                .metadata
+                .repos
+                .iter()
+                .enumerate()
+                .filter(|(_, repo)| {
+                    if q.is_empty() {
+                        return true;
+                    }
+                    let repo_name =
+                        format!("{}/{}", repo.git_uri.user, repo.git_uri.repo).to_lowercase();
+                    let dir_str = repo.dir.display().to_string().to_lowercase();
+                    repo_name.contains(&q) || dir_str.contains(&q)
+                })
+                .map(|(i, _)| i)
+                .collect();
+
+            match matches.len() {
+                0 => {
+                    eprintln!("error: no repository matching '{}'", query);
+                    std::process::exit(1);
                 }
-            })
-            .collect::<Vec<String>>();
-
-        let selection = FuzzySelect::new()
-            .with_prompt(prompt)
-            .with_initial_text(query)
-            .default(0)
-            .highlight_matches(true)
-            .max_length(10)
-            .items(&items)
-            .interact()
-            .unwrap();
-
-        self.metadata.repos.get_mut(selection)
+                1 => self.metadata.repos.get_mut(matches[0]),
+                _ => {
+                    eprintln!("error: ambiguous query '{}' — multiple matches:", query);
+                    for i in &matches {
+                        let repo = &self.metadata.repos[*i];
+                        eprintln!(
+                            "  {}/{}  ({})",
+                            repo.git_uri.user,
+                            repo.git_uri.repo,
+                            repo.dir.display()
+                        );
+                    }
+                    eprintln!("Hint: provide a more specific query.");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     fn success_message(message: &str) {
@@ -441,18 +551,56 @@ impl PjiApp {
             .expect("can't set clipboard");
 
         println!(
-            "📋 Copied \"{}\" to clipboard. {}", // Changed
+            "📋 Copied \"{}\" to clipboard. {}",
             style(text).green(),
             context_message
         )
     }
 
-    fn confirm(message: &str) -> bool {
-        let confirmation = Confirm::new()
+    /// Prompt for confirmation.
+    /// In non-interactive mode with `--yes`, always returns `true`.
+    /// In non-interactive mode without `--yes`, returns `false` (skip).
+    fn confirm(&self, message: &str) -> bool {
+        if !self.interactive {
+            return self.auto_yes;
+        }
+        Confirm::new()
             .with_prompt(format!("❓ {}", style(message).yellow()))
             .interact()
-            .unwrap();
-        confirmation
+            .unwrap()
+    }
+
+    // ==================== exec_into_dir ====================
+
+    /// In interactive mode: replace the process with a shell in `dir`.
+    /// In non-interactive mode: print the path to stdout and exit 0,
+    /// enabling `cd $(pji -n find myrepo)` shell integration.
+    fn exec_into_dir(&self, dir: &PathBuf) {
+        if !self.interactive {
+            println!("{}", dir.display());
+            std::process::exit(0);
+        }
+        self.exec_into_dir_interactive(dir);
+    }
+
+    #[cfg(unix)]
+    fn exec_into_dir_interactive(&self, dir: &PathBuf) {
+        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let err = Command::new(&shell).current_dir(dir).exec();
+        eprintln!("Failed to exec shell: {}", err);
+    }
+
+    #[cfg(windows)]
+    fn exec_into_dir_interactive(&self, dir: &PathBuf) {
+        let shell = env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        match Command::new(&shell)
+            .current_dir(dir)
+            .spawn()
+            .and_then(|mut child| child.wait())
+        {
+            Ok(_) => {}
+            Err(e) => eprintln!("Failed to spawn shell: {}", e),
+        }
     }
 
     // ==================== Worktree Commands ====================
@@ -502,7 +650,8 @@ impl PjiApp {
         }
     }
 
-    /// Fuzzy select and switch to a worktree
+    /// Select and switch to a worktree.
+    /// Non-interactive mode: requires `query` to resolve to exactly one worktree.
     pub fn worktree_switch(&mut self, query: Option<String>) {
         let repo_dir = self.get_worktree_repo_dir(None);
         let repo_dir = match repo_dir {
@@ -531,8 +680,17 @@ impl PjiApp {
         }
     }
 
-    /// Create a new worktree with interactive flow
-    pub fn worktree_add(&mut self) {
+    /// Create a new worktree.
+    ///
+    /// Interactive mode: full TUI flow.
+    /// Non-interactive mode: `--branch` is required; `--new-branch`, `--base`, `--path` optional.
+    pub fn worktree_add(
+        &mut self,
+        branch: Option<String>,
+        new_branch: bool,
+        base: Option<String>,
+        path: Option<String>,
+    ) {
         let repo_dir = self.get_worktree_repo_dir(None);
         let repo_dir = match repo_dir {
             Some(dir) => dir,
@@ -542,15 +700,23 @@ impl PjiApp {
             }
         };
 
+        if self.interactive {
+            self.worktree_add_interactive(&repo_dir);
+        } else {
+            self.worktree_add_non_interactive(&repo_dir, branch, new_branch, base, path);
+        }
+    }
+
+    fn worktree_add_interactive(&mut self, repo_dir: &PathBuf) {
         // Interactive flow
         let (final_branch, create_new, base_branch) =
-            match self.select_branch_for_worktree(&repo_dir) {
+            match self.select_branch_for_worktree(repo_dir) {
                 Some(result) => result,
                 None => return,
             };
 
         // Get default path and allow user to edit
-        let default_path = get_default_worktree_path(&repo_dir, &final_branch);
+        let default_path = get_default_worktree_path(repo_dir, &final_branch);
         let worktree_path: String = Input::new()
             .with_prompt("Worktree path")
             .default(default_path.display().to_string())
@@ -560,7 +726,7 @@ impl PjiApp {
         let worktree_path = PathBuf::from(worktree_path);
 
         match add_worktree(
-            &repo_dir,
+            repo_dir,
             &final_branch,
             Some(worktree_path.clone()),
             create_new,
@@ -575,6 +741,50 @@ impl PjiApp {
             }
             Err(e) => {
                 eprintln!("Failed to create worktree: {}", e);
+            }
+        }
+    }
+
+    fn worktree_add_non_interactive(
+        &mut self,
+        repo_dir: &PathBuf,
+        branch: Option<String>,
+        new_branch: bool,
+        base: Option<String>,
+        path: Option<String>,
+    ) {
+        let branch_name = match branch {
+            Some(b) => b,
+            None => {
+                eprintln!(
+                    "error: --branch <name> is required in non-interactive mode.\n\
+                     Example: pji worktree add --branch my-feature --new-branch"
+                );
+                std::process::exit(1);
+            }
+        };
+
+        let worktree_path = path
+            .map(PathBuf::from)
+            .or_else(|| Some(get_default_worktree_path(repo_dir, &branch_name)));
+
+        match add_worktree(
+            repo_dir,
+            &branch_name,
+            worktree_path,
+            new_branch,
+            base.as_deref(),
+        ) {
+            Ok(worktree_path) => {
+                Self::success_message(&format!(
+                    "Worktree created at '{}'",
+                    worktree_path.display()
+                ));
+                self.exec_into_dir(&worktree_path);
+            }
+            Err(e) => {
+                eprintln!("Failed to create worktree: {}", e);
+                std::process::exit(1);
             }
         }
     }
@@ -698,7 +908,9 @@ impl PjiApp {
         branches
     }
 
-    /// Remove a worktree
+    /// Remove a worktree.
+    ///
+    /// Non-interactive mode: `worktree` arg is required; confirmation is skipped unless `--yes`.
     pub fn worktree_remove(&mut self, worktree: Option<String>, force: bool) {
         let repo_dir = self.get_worktree_repo_dir(None);
         let repo_dir = match repo_dir {
@@ -738,6 +950,13 @@ impl PjiApp {
                 }
             }
             None => {
+                if !self.interactive {
+                    eprintln!(
+                        "error: worktree name/path is required in non-interactive mode.\n\
+                         Example: pji worktree remove my-feature"
+                    );
+                    std::process::exit(1);
+                }
                 // Interactive selection from linked worktrees only
                 let items: Vec<String> = worktrees
                     .linked
@@ -764,7 +983,7 @@ impl PjiApp {
         };
 
         // Confirm removal
-        if !Self::confirm(&format!(
+        if !self.confirm(&format!(
             "Remove worktree at '{}'?",
             worktree_path.display()
         )) {
@@ -814,8 +1033,8 @@ impl PjiApp {
         }
     }
 
-    /// Get the repository directory for worktree operations
-    /// If in a worktree, returns the main repo directory
+    /// Get the repository directory for worktree operations.
+    /// If `query` is provided, fuzzy/filter-selects the repo; otherwise uses CWD.
     fn get_worktree_repo_dir(&mut self, query: Option<String>) -> Option<PathBuf> {
         match query {
             Some(q) => {
@@ -826,8 +1045,8 @@ impl PjiApp {
         }
     }
 
-    /// Get the current working directory's repository directory
-    /// Handles both main repos and linked worktrees
+    /// Get the current working directory's repository directory.
+    /// Handles both main repos and linked worktrees.
     fn get_cwd_repo_dir(&self) -> Option<PathBuf> {
         let cwd = env::current_dir().ok()?;
 
@@ -858,61 +1077,78 @@ impl PjiApp {
             .map(|repo| repo.dir.clone())
     }
 
-    /// Select a worktree from the list using fuzzy selection
+    /// Select a worktree from the list.
+    /// Non-interactive mode: filters by `query`; errors on ambiguity.
     fn select_worktree<'a>(
         &self,
         worktrees: &'a worktree::WorktreeList,
         query: &str,
     ) -> Option<&'a GitWorktree> {
         let all_worktrees = worktrees.all();
-        let items: Vec<String> = all_worktrees
-            .iter()
-            .map(|wt| {
-                let status = if wt.is_main { " (main)" } else { "" };
-                format!(
-                    "{}{}  {}",
-                    wt.branch.as_deref().unwrap_or("detached"),
-                    status,
-                    wt.path.display()
-                )
-            })
-            .collect();
 
-        let selection = FuzzySelect::new()
-            .with_prompt("Select worktree")
-            .with_initial_text(query)
-            .default(0)
-            .highlight_matches(true)
-            .max_length(10)
-            .items(&items)
-            .interact()
-            .unwrap();
+        if self.interactive {
+            let items: Vec<String> = all_worktrees
+                .iter()
+                .map(|wt| {
+                    let status = if wt.is_main { " (main)" } else { "" };
+                    format!(
+                        "{}{}  {}",
+                        wt.branch.as_deref().unwrap_or("detached"),
+                        status,
+                        wt.path.display()
+                    )
+                })
+                .collect();
 
-        all_worktrees.get(selection).copied()
-    }
+            let selection = FuzzySelect::new()
+                .with_prompt("Select worktree")
+                .with_initial_text(query)
+                .default(0)
+                .highlight_matches(true)
+                .max_length(10)
+                .items(&items)
+                .interact()
+                .unwrap();
 
-    /// Execute into a directory (replace current process with shell in that directory)
-    #[cfg(unix)]
-    fn exec_into_dir(&self, dir: &PathBuf) {
-        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+            all_worktrees.get(selection).copied()
+        } else {
+            // Non-interactive: filter by query
+            let q = query.to_lowercase();
+            let matches: Vec<&&GitWorktree> = all_worktrees
+                .iter()
+                .filter(|wt| {
+                    if q.is_empty() {
+                        return wt.is_main;
+                    }
+                    let branch = wt.branch.as_deref().unwrap_or("").to_lowercase();
+                    let path = wt.path.display().to_string().to_lowercase();
+                    branch.contains(&q) || path.contains(&q)
+                })
+                .collect();
 
-        let err = Command::new(&shell).current_dir(dir).exec();
-
-        eprintln!("Failed to exec shell: {}", err);
-    }
-
-    /// Execute into a directory (spawn shell in that directory on Windows)
-    #[cfg(windows)]
-    fn exec_into_dir(&self, dir: &PathBuf) {
-        let shell = env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
-
-        match Command::new(&shell)
-            .current_dir(dir)
-            .spawn()
-            .and_then(|mut child| child.wait())
-        {
-            Ok(_) => {}
-            Err(e) => eprintln!("Failed to spawn shell: {}", e),
+            match matches.len() {
+                0 => {
+                    if q.is_empty() {
+                        // fall back to first
+                        all_worktrees.first().copied()
+                    } else {
+                        eprintln!("error: no worktree matching '{}'", query);
+                        std::process::exit(1);
+                    }
+                }
+                1 => Some(matches[0]),
+                _ => {
+                    eprintln!("error: ambiguous worktree query '{}' — matches:", query);
+                    for wt in &matches {
+                        eprintln!(
+                            "  {}  ({})",
+                            wt.branch.as_deref().unwrap_or("detached"),
+                            wt.path.display()
+                        );
+                    }
+                    std::process::exit(1);
+                }
+            }
         }
     }
 }
