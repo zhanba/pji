@@ -1,5 +1,8 @@
 use clap::{Args, Parser, Subcommand};
-use pji::app::PjiApp;
+
+mod app;
+
+use app::PjiApp;
 
 /// A CLI for managing, finding, and opening Git repositories.
 #[derive(Debug, Parser)]
@@ -111,68 +114,72 @@ struct OpenHomeArgs {
     url: Option<String>,
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         Some(command) => match command {
             Commands::Config => {
-                PjiApp::new().start_config();
+                PjiApp::new()?.start_config()?;
             }
             Commands::Add { git } => {
-                PjiApp::new().add(git.as_str());
+                PjiApp::new()?.add(git.as_str())?;
             }
             Commands::Remove { git } => {
-                PjiApp::new().remove(git.as_str());
+                PjiApp::new()?.remove(git.as_str())?;
             }
             Commands::List { long } => {
-                PjiApp::new().list(long);
+                PjiApp::new()?.list(long)?;
             }
             Commands::Find { query } => {
-                PjiApp::new().find(query.as_deref().unwrap_or(""));
+                PjiApp::new()?.find(query.as_deref().unwrap_or(""))?;
             }
             Commands::Scan => {
-                PjiApp::new().scan();
+                PjiApp::new()?.scan()?;
             }
-            Commands::Clean => PjiApp::clean(),
+            Commands::Clean => PjiApp::clean()?,
             Commands::Open(args) => {
                 let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
                 match open_cmd {
                     OpenCommands::Home(home) => {
-                        PjiApp::new().open_home(home.url);
+                        PjiApp::new()?.open_home(home.url)?;
                     }
                     OpenCommands::PR { number } => {
-                        PjiApp::new().open_pr(number);
+                        PjiApp::new()?.open_pr(number)?;
                     }
                     OpenCommands::Issue { number } => {
-                        PjiApp::new().open_issue(number);
+                        PjiApp::new()?.open_issue(number)?;
                     }
                 }
             }
             Commands::Worktree(args) => {
-                let wt_cmd = args.command.unwrap_or(WorktreeCommands::Switch { query: None });
+                let wt_cmd = args
+                    .command
+                    .unwrap_or(WorktreeCommands::Switch { query: None });
                 match wt_cmd {
                     WorktreeCommands::List { query } => {
-                        PjiApp::new().worktree_list(query);
+                        PjiApp::new()?.worktree_list(query)?;
                     }
                     WorktreeCommands::Switch { query } => {
-                        PjiApp::new().worktree_switch(query);
+                        PjiApp::new()?.worktree_switch(query)?;
                     }
                     WorktreeCommands::Add => {
-                        PjiApp::new().worktree_add();
+                        PjiApp::new()?.worktree_add()?;
                     }
                     WorktreeCommands::Remove { worktree, force } => {
-                        PjiApp::new().worktree_remove(worktree, force);
+                        PjiApp::new()?.worktree_remove(worktree, force)?;
                     }
                     WorktreeCommands::Prune => {
-                        PjiApp::new().worktree_prune();
+                        PjiApp::new()?.worktree_prune()?;
                     }
                 }
             }
         },
         None => {
             // Default to find command when no subcommand is provided
-            PjiApp::new().find(cli.query.as_deref().unwrap_or(""));
+            PjiApp::new()?.find(cli.query.as_deref().unwrap_or(""))?;
         }
     }
+
+    Ok(())
 }

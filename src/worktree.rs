@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use crate::error::PjiError;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Represents a single git worktree
@@ -22,10 +23,7 @@ impl GitWorktree {
     /// Get a display name for this worktree
     pub fn display_name(&self) -> String {
         if self.is_main {
-            format!(
-                "{} (main)",
-                self.branch.as_deref().unwrap_or("detached")
-            )
+            format!("{} (main)", self.branch.as_deref().unwrap_or("detached"))
         } else {
             self.branch
                 .as_deref()
@@ -85,7 +83,7 @@ fn parse_worktree_porcelain(output: &str) -> Vec<GitWorktree> {
     let mut is_prunable = false;
 
     for line in output.lines() {
-        if line.starts_with("worktree ") {
+        if let Some(path) = line.strip_prefix("worktree ") {
             // Save previous worktree if exists
             if let (Some(path), Some(commit)) = (current_path.take(), current_commit.take()) {
                 if !is_bare {
@@ -100,16 +98,15 @@ fn parse_worktree_porcelain(output: &str) -> Vec<GitWorktree> {
                 }
             }
             // Start new worktree
-            current_path = Some(PathBuf::from(&line[9..]));
+            current_path = Some(PathBuf::from(path));
             current_branch = None;
             is_bare = false;
             is_locked = false;
             is_prunable = false;
-        } else if line.starts_with("HEAD ") {
-            current_commit = Some(line[5..].to_string());
-        } else if line.starts_with("branch ") {
+        } else if let Some(commit) = line.strip_prefix("HEAD ") {
+            current_commit = Some(commit.to_string());
+        } else if let Some(branch_ref) = line.strip_prefix("branch ") {
             // Branch format is "refs/heads/branch-name"
-            let branch_ref = &line[7..];
             if let Some(branch) = branch_ref.strip_prefix("refs/heads/") {
                 current_branch = Some(branch.to_string());
             } else {
@@ -149,40 +146,47 @@ fn parse_worktree_porcelain(output: &str) -> Vec<GitWorktree> {
 /// * `repo_dir` - Path to the repository (can be main worktree or linked worktree)
 ///
 /// # Returns
-/// * `Some(WorktreeList)` if worktrees are found
-/// * `None` if the command fails or no worktrees exist
-pub fn list_worktrees(repo_dir: &PathBuf) -> Option<WorktreeList> {
+/// * `Ok(Some(WorktreeList))` if worktrees are found
+/// * `Ok(None)` if the command succeeds but no worktrees are found
+/// * `Err(PjiError)` if git cannot be executed or returns an error
+pub(crate) fn list_worktrees(repo_dir: &PathBuf) -> Result<Option<WorktreeList>, PjiError> {
+    let command = format!("git -C {} worktree list --porcelain", repo_dir.display());
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_dir)
         .arg("worktree")
         .arg("list")
         .arg("--porcelain")
-        .output()
-        .ok()?;
+        .output()?;
 
     if !output.status.success() {
-        return None;
+        return Err(PjiError::GitCommand {
+            command,
+            stderr: command_error_output(&output),
+        });
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let worktrees = parse_worktree_porcelain(&stdout);
 
     if worktrees.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let mut iter = worktrees.into_iter();
-    let main = iter.next()?;
+    let main = match iter.next() {
+        Some(main) => main,
+        None => return Ok(None),
+    };
     let linked: Vec<GitWorktree> = iter.collect();
 
-    Some(WorktreeList { main, linked })
+    Ok(Some(WorktreeList { main, linked }))
 }
 
 /// Check if a directory is a linked worktree (not the main worktree)
 ///
 /// A linked worktree has a `.git` file (not directory) that points to the main repo.
-pub fn is_linked_worktree(dir: &PathBuf) -> bool {
+pub(crate) fn is_linked_worktree(dir: &Path) -> bool {
     let git_path = dir.join(".git");
     // A linked worktree has .git as a file, not a directory
     git_path.is_file()
@@ -192,12 +196,12 @@ pub fn is_linked_worktree(dir: &PathBuf) -> bool {
 ///
 /// For a linked worktree, this reads the `.git` file and follows the gitdir reference.
 /// For a main worktree, this returns the same path.
-pub fn get_main_repo_from_worktree(worktree_dir: &PathBuf) -> Option<PathBuf> {
+pub(crate) fn get_main_repo_from_worktree(worktree_dir: &Path) -> Option<PathBuf> {
     let git_path = worktree_dir.join(".git");
 
     if git_path.is_dir() {
         // This is the main worktree
-        return Some(worktree_dir.clone());
+        return Some(worktree_dir.to_path_buf());
     }
 
     if git_path.is_file() {
@@ -228,7 +232,7 @@ pub fn get_main_repo_from_worktree(worktree_dir: &PathBuf) -> Option<PathBuf> {
 /// # Returns
 /// * `Ok(PathBuf)` - Path to the created worktree
 /// * `Err(String)` - Error message
-pub fn add_worktree(
+pub(crate) fn add_worktree(
     repo_dir: &PathBuf,
     branch: &str,
     path: Option<PathBuf>,
@@ -257,10 +261,7 @@ pub fn add_worktree(
 
     // Build the git worktree add command
     let mut cmd = Command::new("git");
-    cmd.arg("-C")
-        .arg(repo_dir)
-        .arg("worktree")
-        .arg("add");
+    cmd.arg("-C").arg(repo_dir).arg("worktree").arg("add");
 
     if create_branch {
         cmd.arg("-b").arg(branch);
@@ -295,7 +296,7 @@ pub fn add_worktree(
 ///
 /// # Returns
 /// * `PathBuf` - Default worktree path
-pub fn get_default_worktree_path(repo_dir: &PathBuf, branch: &str) -> PathBuf {
+pub(crate) fn get_default_worktree_path(repo_dir: &Path, branch: &str) -> PathBuf {
     let repo_name = repo_dir
         .file_name()
         .and_then(|n| n.to_str())
@@ -316,12 +317,13 @@ pub fn get_default_worktree_path(repo_dir: &PathBuf, branch: &str) -> PathBuf {
 /// * `repo_dir` - Path to the repository
 /// * `worktree_path` - Path to the worktree to remove
 /// * `force` - If true, force removal even if the worktree is dirty
-pub fn remove_worktree(repo_dir: &PathBuf, worktree_path: &PathBuf, force: bool) -> Result<(), String> {
+pub(crate) fn remove_worktree(
+    repo_dir: &PathBuf,
+    worktree_path: &PathBuf,
+    force: bool,
+) -> Result<(), String> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C")
-        .arg(repo_dir)
-        .arg("worktree")
-        .arg("remove");
+    cmd.arg("-C").arg(repo_dir).arg("worktree").arg("remove");
 
     if force {
         cmd.arg("--force");
@@ -346,7 +348,7 @@ pub fn remove_worktree(repo_dir: &PathBuf, worktree_path: &PathBuf, force: bool)
 ///
 /// # Returns
 /// * `Vec<String>` - List of local branch names
-pub fn list_local_branches(repo_dir: &PathBuf) -> Vec<String> {
+pub(crate) fn list_local_branches(repo_dir: &PathBuf) -> Vec<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_dir)
@@ -375,7 +377,7 @@ pub fn list_local_branches(repo_dir: &PathBuf) -> Vec<String> {
 ///
 /// # Returns
 /// * `Vec<String>` - List of remote branch names (e.g., "origin/main")
-pub fn list_remote_branches(repo_dir: &PathBuf) -> Vec<String> {
+pub(crate) fn list_remote_branches(repo_dir: &PathBuf) -> Vec<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_dir)
@@ -398,7 +400,7 @@ pub fn list_remote_branches(repo_dir: &PathBuf) -> Vec<String> {
 }
 
 /// Prune stale worktree information
-pub fn prune_worktrees(repo_dir: &PathBuf) -> Result<String, String> {
+pub(crate) fn prune_worktrees(repo_dir: &PathBuf) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_dir)
@@ -415,6 +417,15 @@ pub fn prune_worktrees(repo_dir: &PathBuf) -> Result<String, String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(stdout.to_string())
+}
+
+fn command_error_output(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        format!("exit status {}", output.status)
+    } else {
+        stderr
+    }
 }
 
 #[cfg(test)]
