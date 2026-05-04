@@ -1,14 +1,25 @@
 use clap::{Args, Parser, Subcommand};
+use dialoguer::console::{user_attended, user_attended_stderr};
+use std::io::{self, IsTerminal};
+use std::path::PathBuf;
 
 mod app;
 
-use app::PjiApp;
+use app::{AppOptions, PjiApp};
 
 /// A CLI for managing, finding, and opening Git repositories.
 #[derive(Debug, Parser)]
 #[command(name = "pji")]
 #[command(version, about = "A CLI for managing, finding, and opening Git repositories.", long_about = None)]
 struct Cli {
+    /// Force non-interactive mode; also auto-enabled when not attached to a terminal
+    #[arg(short = 'n', long, global = true)]
+    non_interactive: bool,
+
+    /// Select a root directory without prompting
+    #[arg(long, global = true, value_name = "DIR")]
+    root: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 
@@ -19,7 +30,10 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Configure the root directory for your repositories
-    Config,
+    Config {
+        /// Root directory to add
+        root: Option<PathBuf>,
+    },
     /// Add a git repository
     Add {
         /// git repository url
@@ -29,6 +43,9 @@ enum Commands {
     Remove {
         /// git repository url
         git: String,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// List all git repositories
     List {
@@ -68,8 +85,20 @@ enum WorktreeCommands {
         /// Optional query to filter worktrees
         query: Option<String>,
     },
-    /// Create a new worktree (interactive)
-    Add,
+    /// Create a new worktree
+    Add {
+        /// Branch to check out or create
+        branch: Option<String>,
+        /// Worktree path. Defaults to the standard pji worktree path.
+        #[arg(short, long, value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Base branch when creating a new branch
+        #[arg(short = 'b', long, value_name = "BRANCH")]
+        base: Option<String>,
+        /// Create a new branch
+        #[arg(long)]
+        new_branch: bool,
+    },
     /// Remove a worktree
     Remove {
         /// Path or name of the worktree to remove
@@ -77,6 +106,9 @@ enum WorktreeCommands {
         /// Force removal even if worktree is dirty
         #[arg(short, long)]
         force: bool,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Clean up stale worktree information
     Prune,
@@ -116,39 +148,44 @@ struct OpenHomeArgs {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let app_options = AppOptions {
+        interactive: !cli.non_interactive && terminal_is_interactive(),
+        root: cli.root,
+    };
+    let mut app = PjiApp::new(app_options)?;
 
     match cli.command {
         Some(command) => match command {
-            Commands::Config => {
-                PjiApp::new()?.start_config()?;
+            Commands::Config { root } => {
+                app.start_config(root)?;
             }
             Commands::Add { git } => {
-                PjiApp::new()?.add(git.as_str())?;
+                app.add(git.as_str())?;
             }
-            Commands::Remove { git } => {
-                PjiApp::new()?.remove(git.as_str())?;
+            Commands::Remove { git, yes } => {
+                app.remove(git.as_str(), yes)?;
             }
             Commands::List { long } => {
-                PjiApp::new()?.list(long)?;
+                app.list(long)?;
             }
             Commands::Find { query } => {
-                PjiApp::new()?.find(query.as_deref().unwrap_or(""))?;
+                app.find(query.as_deref().unwrap_or(""))?;
             }
             Commands::Scan => {
-                PjiApp::new()?.scan()?;
+                app.scan()?;
             }
             Commands::Clean => PjiApp::clean()?,
             Commands::Open(args) => {
                 let open_cmd = args.command.unwrap_or(OpenCommands::Home(args.home));
                 match open_cmd {
                     OpenCommands::Home(home) => {
-                        PjiApp::new()?.open_home(home.url)?;
+                        app.open_home(home.url)?;
                     }
                     OpenCommands::PR { number } => {
-                        PjiApp::new()?.open_pr(number)?;
+                        app.open_pr(number)?;
                     }
                     OpenCommands::Issue { number } => {
-                        PjiApp::new()?.open_issue(number)?;
+                        app.open_issue(number)?;
                     }
                 }
             }
@@ -158,28 +195,43 @@ fn main() -> anyhow::Result<()> {
                     .unwrap_or(WorktreeCommands::Switch { query: None });
                 match wt_cmd {
                     WorktreeCommands::List { query } => {
-                        PjiApp::new()?.worktree_list(query)?;
+                        app.worktree_list(query)?;
                     }
                     WorktreeCommands::Switch { query } => {
-                        PjiApp::new()?.worktree_switch(query)?;
+                        app.worktree_switch(query)?;
                     }
-                    WorktreeCommands::Add => {
-                        PjiApp::new()?.worktree_add()?;
+                    WorktreeCommands::Add {
+                        branch,
+                        path,
+                        base,
+                        new_branch,
+                    } => {
+                        app.worktree_add(branch, path, base, new_branch)?;
                     }
-                    WorktreeCommands::Remove { worktree, force } => {
-                        PjiApp::new()?.worktree_remove(worktree, force)?;
+                    WorktreeCommands::Remove {
+                        worktree,
+                        force,
+                        yes,
+                    } => {
+                        app.worktree_remove(worktree, force, yes)?;
                     }
                     WorktreeCommands::Prune => {
-                        PjiApp::new()?.worktree_prune()?;
+                        app.worktree_prune()?;
                     }
                 }
             }
         },
         None => {
             // Default to find command when no subcommand is provided
-            PjiApp::new()?.find(cli.query.as_deref().unwrap_or(""))?;
+            app.find(cli.query.as_deref().unwrap_or(""))?;
         }
     }
 
     Ok(())
+}
+
+fn terminal_is_interactive() -> bool {
+    // A prompt-driven CLI needs all three streams attached: stdin for input,
+    // stdout for shell handoff/output, and stderr for dialoguer prompts.
+    io::stdin().is_terminal() && user_attended() && user_attended_stderr()
 }
