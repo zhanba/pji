@@ -5,7 +5,7 @@
 ## Publish
 
 ```sh
-brew upgrade cargo-dist
+cargo install cargo-dist
 
 dist init
 
